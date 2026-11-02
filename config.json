@@ -188,11 +188,16 @@
   "digest_categories": [],
   "sources": [
     "realdiscount",
-    "courson"
+    "courson",
+    "discudemy",
+    "udemyfreebies",
+    "idownloadcoupon"
   ],
-  "pages": 2,
+  "pages": 5,
   "max_messages_per_run": 10,
   "max_digest_per_run": 40,
   "digest_chunk": 10,
-  "match_description": false
+  "match_description": false,
+  "pages_html": 3,
+  "max_resolves_per_run": 25
 }

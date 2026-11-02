@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Udemy Deal Alert.
 
-Fetches public Udemy coupon feeds and sends every NEW 100%-off course to Telegram:
-  * courses matching your interest keywords  -> one message each (with notification sound)
-  * all other free courses (if notify_all_free) -> compact silent digest messages
-
-Uses only the Python standard library.
+Fetches public Udemy coupon feeds and sends every NEW 100%-off course that matches
+your keywords to Telegram. Uses only the Python standard library.
 Secrets (GitHub Secrets / env vars): TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+Sources come in two kinds:
+  * direct  - the feed already contains the Udemy coupon link (real.discount, courson)
+  * lazy    - the feed lists titles only; the coupon link needs one more request, so it is
+              fetched ONLY for titles that match your keywords (discudemy, udemyfreebies,
+              idownloadcoupon)
 
 Usage:
   python check_deals.py          # normal run
   python check_deals.py --test   # send a test Telegram message only
   python check_deals.py --dry    # fetch + filter, print results, no Telegram, no seen.json update
-  python check_deals.py --raw    # like --dry but also prints every fetched coupon
+  python check_deals.py --raw    # like --dry but also prints every fetched item
 """
 import html
 import json
@@ -23,6 +26,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -47,6 +51,11 @@ def http_request(url, headers=None, data=None, timeout=30):
             return r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"HTTP {e.code} from {urllib.parse.urlparse(url).netloc}") from None
+
+
+def http_html(url, referer=None):
+    return http_request(url, headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                                      "Referer": referer or url})
 
 
 def get_json(url, headers=None, data=None):
@@ -99,13 +108,67 @@ def to_float(v):
         return None
 
 
-def deal(title, url, source, discount=100, categories=None, text="", rating=None):
+def deal(title, url, source, discount=100, categories=None, text="", rating=None, ref="", resolve=None):
     return {"title": html.unescape(title or "").strip(), "url": url, "discount": discount,
             "categories": [c for c in (categories or []) if c], "text": (text or "")[:500],
-            "rating": rating, "source": source}
+            "rating": rating, "source": source, "ref": ref, "resolve": resolve}
 
 
-# ---------- sources (each takes cfg, returns a list of deal dicts) ----------
+def lazy_deal(title, ref, source, resolve):
+    """Listing item whose Udemy coupon link is fetched later (only if the title matches)."""
+    return deal(title, "", source, 100, [], "", None, ref, resolve)
+
+
+def deal_ref(d):
+    return coupon_key(d["url"]) if d["url"] else d["ref"]
+
+
+class AnchorParser(HTMLParser):
+    """Collects <a class="...token..."> anchors with their text and any <img alt>."""
+
+    def __init__(self, class_token):
+        super().__init__()
+        self.tok, self.items, self._cur = class_token, [], None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "a" and self.tok in (a.get("class") or "").split():
+            self._cur = {"href": a.get("href") or "", "text": "", "alt": ""}
+        elif tag == "img" and self._cur is not None:
+            self._cur["alt"] = a.get("alt") or self._cur["alt"]
+
+    def handle_data(self, data):
+        if self._cur is not None:
+            self._cur["text"] += data
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._cur is not None:
+            self.items.append(self._cur)
+            self._cur = None
+
+
+def anchors(page_html, class_token):
+    p = AnchorParser(class_token)
+    p.feed(page_html)
+    return p.items
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def redirect_location(url):
+    """Return the Location header of a redirect without following it."""
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        urllib.request.build_opener(_NoRedirect).open(req, timeout=30)
+        return ""
+    except urllib.error.HTTPError as e:
+        return urllib.parse.unquote(e.headers.get("Location") or "")
+
+
+# ---------- direct sources (feed already has the coupon link) ----------
 def source_realdiscount(cfg):
     """real.discount public JSON (free coupons only), several pages."""
     out = []
@@ -167,15 +230,89 @@ def source_courson(cfg):
     return out
 
 
+# ---------- lazy sources (titles first, coupon link only for matching titles) ----------
+def source_discudemy(cfg):
+    out = []
+    for page in range(1, cfg.get("pages_html", 3) + 1):
+        try:
+            page_html = http_html(f"https://www.discudemy.com/all/{page}", "https://www.discudemy.com")
+        except Exception:
+            if page == 1:
+                raise
+            break
+        found = anchors(page_html, "card-header")
+        if not found:
+            break
+        for it in found:
+            gid = it["href"].rstrip("/").split("/")[-1]
+            title = html.unescape(it["text"]).strip()
+            if gid and title:
+                out.append(lazy_deal(title, f"discudemy:{gid}", "discudemy",
+                                     lambda g=gid: find_udemy_url(http_html(f"https://www.discudemy.com/go/{g}",
+                                                                           "https://www.discudemy.com"))))
+    return out
+
+
+def source_udemyfreebies(cfg):
+    out = []
+
+    def resolve(slug):
+        req = urllib.request.Request(f"https://www.udemyfreebies.com/out/{slug}", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:  # follows the redirect to Udemy
+            return find_udemy_url(r.geturl()) or find_udemy_url(r.read().decode("utf-8", "replace"))
+
+    for page in range(1, cfg.get("pages_html", 3) + 1):
+        try:
+            page_html = http_html(f"https://www.udemyfreebies.com/free-udemy-courses/{page}")
+        except Exception:
+            if page == 1:
+                raise
+            break
+        found = anchors(page_html, "theme-img")
+        if not found:
+            break
+        for it in found:
+            parts = it["href"].split("/")
+            slug = parts[4] if len(parts) > 4 else ""
+            title = html.unescape(it["alt"] or it["text"]).strip()
+            if slug and title:
+                out.append(lazy_deal(title, f"udemyfreebies:{slug}", "udemyfreebies", lambda s=slug: resolve(s)))
+    return out
+
+
+def source_idownloadcoupon(cfg):
+    out = []
+    for page in range(1, cfg.get("pages_html", 3) + 1):
+        try:
+            posts = get_json("https://idownloadcoupon.com/wp-json/wp/v2/product?"
+                             + urllib.parse.urlencode({"product_cat": 15, "per_page": 100, "page": page}))
+        except Exception:
+            if page == 1:
+                raise
+            break
+        if not posts:
+            break
+        for p in posts:
+            pid = p.get("id")
+            title = strip_tags((p.get("title") or {}).get("rendered", ""))
+            if pid and title:
+                out.append(lazy_deal(title, f"idownloadcoupon:{pid}", "idownloadcoupon",
+                                     lambda i=pid: find_udemy_url(redirect_location(f"https://idownloadcoupon.com/udemy/{i}/"))))
+    return out
+
+
 SOURCES = {
     "realdiscount": source_realdiscount,
     "courson": source_courson,
+    "discudemy": source_discudemy,
+    "udemyfreebies": source_udemyfreebies,
+    "idownloadcoupon": source_idownloadcoupon,
 }
 
 
 # ---------- filtering ----------
 def haystack(d, cfg):
-    slug = urllib.parse.urlparse(d["url"]).path.strip("/").split("/")[-1].replace("-", " ")
+    slug = urllib.parse.urlparse(d["url"]).path.strip("/").split("/")[-1].replace("-", " ") if d["url"] else ""
     parts = [d["title"], " ".join(d["categories"]), slug]
     if cfg.get("match_description", False):
         parts.append(d["text"])
@@ -278,22 +415,52 @@ def main():
             continue
         try:
             got = fn(cfg)
-            print(f"[{name}] fetched {len(got)} coupons")
+            print(f"[{name}] fetched {len(got)} items")
             if raw:
                 for d in got:
-                    print("   *", d["title"][:70], "|", d["categories"], "|", d["url"])
+                    print("   *", d["title"][:70], "|", d["categories"], "|", d["url"] or d["ref"])
             all_deals.extend(got)
         except Exception as e:  # keep going if one source is down
             print(f"[{name}] ERROR: {e}")
             errors.append(name)
 
-    # new, unique, passing the basic rules
-    new, batch_keys = [], set()
+    # new, unique, passing the basic rules. Lazy items are resolved only when their title matches.
+    new, batch_keys, newly_seen = [], set(), set()
+    resolves, fails = 0, {}
+    max_res = cfg.get("max_resolves_per_run", 25)
     for d in all_deals:
-        k = coupon_key(d["url"])
-        if k in seen_set or k in batch_keys:
+        ref = deal_ref(d)
+        if ref in seen_set or ref in batch_keys:
             continue
-        batch_keys.add(k)
+        batch_keys.add(ref)
+        newly_seen.add(ref)
+        if d["url"]:                      # direct source
+            if is_free(d, cfg):
+                new.append(d)
+            continue
+        # lazy source
+        if not (is_free(d, cfg) and is_interest(d, cfg)):
+            continue
+        if resolves >= max_res or fails.get(d["source"], 0) >= 3:
+            newly_seen.discard(ref)       # try again on the next run
+            continue
+        resolves += 1
+        try:
+            url = d["resolve"]()
+        except Exception as e:
+            fails[d["source"]] = fails.get(d["source"], 0) + 1
+            print(f"[{d['source']}] could not resolve '{d['title'][:50]}': {e}")
+            newly_seen.discard(ref)
+            continue
+        time.sleep(0.3)
+        if not url:
+            continue
+        key = coupon_key(url)
+        newly_seen.add(key)
+        if key in seen_set or key in batch_keys:
+            continue
+        batch_keys.add(key)
+        d["url"] = url
         if is_free(d, cfg):
             new.append(d)
 
@@ -310,13 +477,13 @@ def main():
     dropped = max(0, len(digest) - max_digest)
     digest = digest[:max_digest]
     print(f"{len(new)} new free coupons -> {len(loud)} interest alerts + {len(digest)} in digest "
-          f"(of {len(all_deals)} fetched)")
+          f"(of {len(all_deals)} items fetched, {resolves} links resolved)")
 
     if dry:
         for d in loud:
-            print("INTEREST:", d["title"], "|", d["categories"], "|", d["url"])
+            print("INTEREST:", d["title"], "|", d["source"], "|", d["url"])
         for d in digest:
-            print("digest  :", d["title"], "|", d["categories"], "|", d["url"])
+            print("digest  :", d["title"], "|", d["source"], "|", d["url"])
         return
 
     for d in loud:
@@ -328,8 +495,8 @@ def main():
         last = i + chunk >= len(digest)
         tg_send(format_digest(part, i, len(digest), dropped if last else 0), silent=True, preview=False)
 
-    # mark ALL fetched coupons as seen so nothing is repeated later
-    seen = list(dict.fromkeys(seen + [coupon_key(d["url"]) for d in all_deals]))[-5000:]
+    # remember everything we looked at so nothing is repeated later
+    seen = list(dict.fromkeys(seen + sorted(newly_seen)))[-8000:]
     SEEN_FILE.write_text(json.dumps(seen, indent=0), encoding="utf-8")
 
     if names and len(errors) == len(names):

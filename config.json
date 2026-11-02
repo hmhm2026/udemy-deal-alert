@@ -3,7 +3,10 @@
   "min_rating": 0,
   "categories": [
     "software testing",
-    "qa",
+    "qa engineer",
+    "qa automation",
+    "qa testing",
+    "test engineer",
     "quality assurance",
     "test automation",
     "selenium",
@@ -18,7 +21,7 @@
     "playwright",
     "jira"
   ],
-  "exclude_keywords": [],
+  "exclude_keywords": ["200 qa"],
   "sources": [
     "realdiscount",
     "courson"

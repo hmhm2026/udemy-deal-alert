@@ -282,10 +282,17 @@ def source_udemyfreebies(cfg):
 
 def source_idownloadcoupon(cfg):
     out = []
+    use_cat = True  # the category id may have changed on the site; fall back to no category if empty
     for page in range(1, cfg.get("pages_html", 3) + 1):
+        params = {"per_page": 100, "page": page}
+        if use_cat:
+            params["product_cat"] = 15
         try:
-            posts = get_json("https://idownloadcoupon.com/wp-json/wp/v2/product?"
-                             + urllib.parse.urlencode({"product_cat": 15, "per_page": 100, "page": page}))
+            posts = get_json("https://idownloadcoupon.com/wp-json/wp/v2/product?" + urllib.parse.urlencode(params))
+            if page == 1 and use_cat and not posts:
+                use_cat = False
+                posts = get_json("https://idownloadcoupon.com/wp-json/wp/v2/product?"
+                                 + urllib.parse.urlencode({"per_page": 100, "page": 1}))
         except Exception:
             if page == 1:
                 raise

@@ -1,0 +1,31 @@
+{
+ "health": {
+  "realdiscount": {
+   "fails": 0,
+   "alerted": false,
+   "last_error": ""
+  },
+  "courson": {
+   "fails": 0,
+   "alerted": false,
+   "last_error": ""
+  },
+  "discudemy": {
+   "fails": 0,
+   "alerted": false,
+   "last_error": ""
+  },
+  "udemyfreebies": {
+   "fails": 0,
+   "alerted": false,
+   "last_error": ""
+  },
+  "idownloadcoupon": {
+   "fails": 0,
+   "alerted": false,
+   "last_error": ""
+  }
+ },
+ "sent": [],
+ "last_summary": "2026-11-02"
+}

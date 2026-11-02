@@ -1,0 +1,24 @@
+{
+  "min_discount": 100,
+  "min_rating": 0,
+  "categories": [
+    "software testing",
+    "qa",
+    "quality assurance",
+    "test automation",
+    "selenium",
+    "postman",
+    "api testing",
+    "rest api",
+    "sql",
+    "python",
+    "istqb",
+    "manual testing",
+    "cypress",
+    "playwright",
+    "jira"
+  ],
+  "exclude_keywords": [],
+  "sources": ["realdiscount", "coursejoiner", "tutorialbar", "courson"],
+  "max_messages_per_run": 10
+}

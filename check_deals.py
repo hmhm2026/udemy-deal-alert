@@ -111,12 +111,40 @@ def to_float(v):
 def deal(title, url, source, discount=100, categories=None, text="", rating=None, ref="", resolve=None):
     return {"title": html.unescape(title or "").strip(), "url": url, "discount": discount,
             "categories": [c for c in (categories or []) if c], "text": (text or "")[:500],
-            "rating": rating, "source": source, "ref": ref, "resolve": resolve}
+            "rating": rating, "source": source, "ref": ref, "resolve": resolve,
+            "evidence": "", "trust_free": True}
 
 
-def lazy_deal(title, ref, source, resolve):
-    """Listing item whose Udemy coupon link is fetched later (only if the title matches)."""
-    return deal(title, "", source, 100, [], "", None, ref, resolve)
+def lazy_deal(title, ref, source, resolve, evidence="", trust_free=True):
+    """Listing item whose Udemy coupon link is fetched later (only if the title matches).
+
+    evidence   - listing text that may state the discount (e.g. '25% OFF')
+    trust_free - True if the site only lists 100% coupons; False if it mixes in partial discounts
+    """
+    d = deal(title, "", source, 100, [], "", None, ref, resolve)
+    d["evidence"], d["trust_free"] = evidence or "", trust_free
+    return d
+
+
+def discount_percents(text):
+    """All percentages that are written as a discount ('25% off', 'discount 80%', '100 % OFF')."""
+    t = html.unescape(text or "")
+    found = re.findall(r"(\d{1,3})\s*%\s*(?:off|discount)", t, re.I)
+    found += re.findall(r"(?:off|discount)\s*(?:of\s*)?:?\s*(\d{1,3})\s*%", t, re.I)
+    return [int(x) for x in found]
+
+
+def listing_says_free(d):
+    """Decide from the listing text only (before spending a request on the coupon link)."""
+    text = d["title"] + " " + d["evidence"]
+    pcts = discount_percents(text)
+    if 100 in pcts:
+        return True
+    if pcts:                      # only partial discounts mentioned, e.g. 25% off
+        return False
+    if re.search(r"\bfree\b", text, re.I):
+        return True
+    return d["trust_free"]        # no information: trust sites that list only free coupons
 
 
 def deal_ref(d):
@@ -303,8 +331,12 @@ def source_idownloadcoupon(cfg):
             pid = p.get("id")
             title = strip_tags((p.get("title") or {}).get("rendered", ""))
             if pid and title:
+                evidence = strip_tags(((p.get("excerpt") or {}).get("rendered", "")) + " "
+                                      + ((p.get("content") or {}).get("rendered", "")))
+                # this site also lists partial discounts, so a coupon counts as free only if it says so
                 out.append(lazy_deal(title, f"idownloadcoupon:{pid}", "idownloadcoupon",
-                                     lambda i=pid: find_udemy_url(redirect_location(f"https://idownloadcoupon.com/udemy/{i}/"))))
+                                     lambda i=pid: find_udemy_url(redirect_location(f"https://idownloadcoupon.com/udemy/{i}/")),
+                                     evidence=evidence, trust_free=False))
     return out
 
 
@@ -447,6 +479,9 @@ def main():
             continue
         # lazy source
         if not (is_free(d, cfg) and is_interest(d, cfg)):
+            continue
+        if not listing_says_free(d):
+            print(f"[{d['source']}] skipped (not 100% off): {d['title'][:60]}")
             continue
         if resolves >= max_res or fails.get(d["source"], 0) >= 3:
             newly_seen.discard(ref)       # try again on the next run

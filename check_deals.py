@@ -26,12 +26,15 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
+from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 CONFIG_FILE = ROOT / "config.json"
 SEEN_FILE = ROOT / "seen.json"
+STATE_FILE = ROOT / "state.json"   # source health + weekly stats (committed by the workflow)
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 UDEMY_RE = re.compile(r"https?://(?:www\.)?udemy\.com/course/[A-Za-z0-9_\-]+/?\?[^\s\"'<>]*couponCode=[A-Za-z0-9_.\-]+", re.I)
@@ -432,11 +435,87 @@ def format_digest(items, start, total, extra_dropped):
     return "\n".join(lines)
 
 
+# ---------- phase 1: source health + weekly summary ----------
+def load_state():
+    s = load_json(STATE_FILE, {})
+    if not isinstance(s, dict):
+        s = {}
+    s.setdefault("health", {})      # {source: {"fails": n, "alerted": bool, "last_error": str}}
+    s.setdefault("sent", [])        # alerts sent since the last summary: [{"t": title, "s": source}]
+    s.setdefault("last_summary", "")
+    return s
+
+
+def update_health(state, results, cfg, notify):
+    """Count consecutive bad runs per source; alert once after N, and again when it recovers.
+
+    Healthy runs change nothing, so they never create a commit. Returns True if state changed."""
+    limit = cfg.get("health_alert_after_runs", 12)   # 12 runs ~ 1 hour at a 5-minute schedule
+    changed = False
+    for name, (count, err) in results.items():
+        h = state["health"].setdefault(name, {"fails": 0, "alerted": False, "last_error": ""})
+        if err or count == 0:
+            h["fails"] += 1
+            h["last_error"] = err or "returned 0 items"
+            changed = True
+            if h["fails"] >= limit and not h["alerted"]:
+                notify(f"⚠️ Source <b>{html.escape(name)}</b> has failed {h['fails']} runs in a row.\n"
+                       f"Last problem: {html.escape(h['last_error'])[:200]}")
+                h["alerted"] = True
+        elif h["fails"] or h["alerted"]:
+            if h["alerted"]:
+                notify(f"✅ Source <b>{html.escape(name)}</b> is working again.")
+            h["fails"], h["alerted"], h["last_error"] = 0, False, ""
+            changed = True
+    return changed
+
+
+def build_summary(state, cfg):
+    sent = state.get("sent", [])
+    lines = ["📊 <b>Weekly summary</b>", f"Courses sent: {len(sent)}"]
+    by_source = Counter(x.get("s", "?") for x in sent)
+    if by_source:
+        lines.append("By source: " + ", ".join(f"{s} {n}" for s, n in by_source.most_common()))
+    for x in sent[-15:]:
+        lines.append(f"• {html.escape(x.get('t', ''))}")
+    if len(sent) > 15:
+        lines.append(f"<i>(+{len(sent) - 15} more)</i>")
+    lines.append("")
+    lines.append("<b>Sources</b>")
+    for name in cfg.get("sources", list(SOURCES)):
+        h = state["health"].get(name, {})
+        lines.append(f"{'⚠️' if h.get('fails') else '✅'} {html.escape(name)}"
+                     + (f" (failing for {h['fails']} runs)" if h.get("fails") else ""))
+    return "\n".join(lines)
+
+
+def maybe_weekly_summary(state, cfg, notify, now=None):
+    """Send the summary when due. The first ever run only records today's date. Returns True if state changed."""
+    now = now or datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    last = state.get("last_summary")
+    if not last:
+        state["last_summary"] = today
+        return True
+    if (date.fromisoformat(today) - date.fromisoformat(last)).days < cfg.get("summary_every_days", 7):
+        return False
+    if now.hour < cfg.get("summary_hour_utc", 7):      # 7 UTC = 9:00 in Egypt
+        return False
+    notify(build_summary(state, cfg))
+    state["sent"], state["last_summary"] = [], today
+    return True
+
+
 # ---------- main ----------
 def main():
     if "--test" in sys.argv:
         tg_send("✅ Udemy Deal Alert is connected and working.")
         print("Test message sent.")
+        return
+
+    if "--summary" in sys.argv:   # send the weekly summary right now (does not reset anything)
+        tg_send(build_summary(load_state(), load_json(CONFIG_FILE, {})), silent=True, preview=False)
+        print("Summary sent.")
         return
 
     raw = "--raw" in sys.argv
@@ -446,7 +525,7 @@ def main():
     seen_set = set(seen)
 
     names = cfg.get("sources", list(SOURCES))
-    all_deals, errors = [], []
+    all_deals, errors, results = [], [], {}
     for name in names:
         fn = SOURCES.get(name)
         if not fn:
@@ -454,12 +533,14 @@ def main():
             continue
         try:
             got = fn(cfg)
+            results[name] = (len(got), "")
             print(f"[{name}] fetched {len(got)} items")
             if raw:
                 for d in got:
                     print("   *", d["title"][:70], "|", d["categories"], "|", d["url"] or d["ref"])
             all_deals.extend(got)
         except Exception as e:  # keep going if one source is down
+            results[name] = (0, str(e))
             print(f"[{name}] ERROR: {e}")
             errors.append(name)
 
@@ -528,14 +609,24 @@ def main():
             print("digest  :", d["title"], "|", d["source"], "|", d["url"])
         return
 
+    state = load_state()
     for d in loud:
         tg_send(format_deal(d))
+        state["sent"].append({"t": d["title"][:80], "s": d["source"]})
+    state["sent"] = state["sent"][-200:]
 
     chunk = cfg.get("digest_chunk", 10)
     for i in range(0, len(digest), chunk):
         part = digest[i:i + chunk]
         last = i + chunk >= len(digest)
         tg_send(format_digest(part, i, len(digest), dropped if last else 0), silent=True, preview=False)
+
+    # source health + weekly summary (state.json is written only when something changed)
+    state_changed = bool(loud)
+    state_changed |= update_health(state, results, cfg, lambda m: tg_send(m, preview=False))
+    state_changed |= maybe_weekly_summary(state, cfg, lambda m: tg_send(m, silent=True, preview=False))
+    if state_changed:
+        STATE_FILE.write_text(json.dumps(state, indent=1, ensure_ascii=False), encoding="utf-8")
 
     # remember everything we looked at so nothing is repeated later
     seen = list(dict.fromkeys(seen + sorted(newly_seen)))[-8000:]

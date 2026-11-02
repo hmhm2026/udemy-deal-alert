@@ -2,11 +2,11 @@ name: Udemy Deal Check
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 15 minutes (GitHub may delay a few minutes)
+    - cron: "*/5 * * * *"    # every 5 minutes (GitHub may delay a few minutes)
   workflow_dispatch:          # lets you run it manually from the Actions tab
 
 permissions:
-  contents: write             # needed to save seen.json back to the repo
+  contents: write             # needed to save seen.json / state.json back to the repo
 
 concurrency:
   group: deal-check
@@ -29,9 +29,12 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python check_deals.py
 
-      - name: Save seen.json
+      - name: Save seen.json and state.json
+        if: always()
         run: |
           git config user.name "deal-bot"
           git config user.email "deal-bot@users.noreply.github.com"
-          git add seen.json
-          git diff --cached --quiet || (git commit -m "update seen deals" && git pull --rebase && git push)
+          for f in seen.json state.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+          git diff --cached --quiet || (git commit -m "update bot state" && git pull --rebase && git push)

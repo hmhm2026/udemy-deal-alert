@@ -131,32 +131,6 @@ def source_realdiscount():
     return out
 
 
-def _wp_posts(host, params, source, link_fields=()):
-    """Generic WordPress REST feed: title.rendered + a udemy link in content / acf fields."""
-    api = f"https://{host}/wp-json/wp/v2/posts?" + urllib.parse.urlencode(params)
-    posts = get_json(api, headers={"Referer": f"https://{host}/"})
-    out = []
-    for p in posts:
-        title = strip_tags((p.get("title") or {}).get("rendered", ""))
-        content = (p.get("content") or {}).get("rendered", "")
-        blob = content + " " + json.dumps(p.get("acf") or {}) + " " + (p.get("link") or "")
-        url = find_udemy_url(blob.replace("\\/", "/"))
-        if not url:
-            continue
-        out.append(deal(re.sub(r"\s*[\(\[]?\s*(?:free course|100%\s*off)[\)\]]?\s*$", "", title, flags=re.I),
-                        url, source, discount_from_text(title + " " + strip_tags(content)[:300]) or 100,
-                        [], strip_tags(content)))
-    return out
-
-
-def source_coursejoiner():
-    return _wp_posts("www.coursejoiner.com", {"categories": 74, "per_page": 50}, "coursejoiner")
-
-
-def source_tutorialbar():
-    return _wp_posts("www.tutorialbar.com", {"categories": 55, "per_page": 50}, "tutorialbar")
-
-
 def source_courson():
     """courson.xyz JSON endpoint used by its 'load more' button."""
     data = get_json("https://courson.xyz/load-more-coupons",
@@ -169,16 +143,16 @@ def source_courson():
         if not slug or not code:
             continue
         cats = [c.get("category"), c.get("subcategory"), c.get("topic")]
-        out.append(deal(c.get("headline") or slug, f"https://www.udemy.com/course/{slug}/?couponCode={code}",
+        headline = c.get("headline") or ""
+        title = headline if 0 < len(headline) <= 100 else slug.replace("-", " ").title()
+        out.append(deal(title, f"https://www.udemy.com/course/{slug}/?couponCode={code}",
                         "courson", 100, [x for x in cats if isinstance(x, str)],
-                        c.get("description") or "", to_float(c.get("rating"))))
+                        headline + " " + (c.get("description") or ""), to_float(c.get("rating"))))
     return out
 
 
 SOURCES = {
     "realdiscount": source_realdiscount,
-    "coursejoiner": source_coursejoiner,
-    "tutorialbar": source_tutorialbar,
     "courson": source_courson,
 }
 
@@ -191,7 +165,11 @@ def matches(d, cfg):
     min_rating = cfg.get("min_rating", 0)
     if min_rating and d["rating"] is not None and d["rating"] < min_rating:
         return False
-    hay = " ".join([d["title"], " ".join(d["categories"]), d["text"]]).lower()
+    slug = urllib.parse.urlparse(d["url"]).path.strip("/").split("/")[-1].replace("-", " ")
+    parts = [d["title"], " ".join(d["categories"]), slug]
+    if cfg.get("match_description", False):
+        parts.append(d["text"])
+    hay = " ".join(parts).lower()
     for bad in cfg.get("exclude_keywords", []):
         if bad.lower() in hay:
             return False

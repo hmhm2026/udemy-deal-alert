@@ -19,6 +19,10 @@
     "jira"
   ],
   "exclude_keywords": [],
-  "sources": ["realdiscount", "coursejoiner", "tutorialbar", "courson"],
-  "max_messages_per_run": 10
+  "sources": [
+    "realdiscount",
+    "courson"
+  ],
+  "max_messages_per_run": 10,
+  "match_description": false
 }

@@ -1,6 +1,7 @@
 {
   "min_discount": 100,
   "min_rating": 0,
+  "notify_all_free": true,
   "categories": [
     "software testing",
     "qa engineer",
@@ -22,10 +23,15 @@
     "jira"
   ],
   "exclude_keywords": ["200 qa"],
+  "skip_other_languages": true,
+  "digest_categories": [],
   "sources": [
     "realdiscount",
     "courson"
   ],
+  "pages": 2,
   "max_messages_per_run": 10,
+  "max_digest_per_run": 40,
+  "digest_chunk": 10,
   "match_description": false
 }

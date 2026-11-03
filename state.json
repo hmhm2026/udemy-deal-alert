@@ -26,6 +26,11 @@
    "last_error": ""
   }
  },
- "sent": [],
+ "sent": [
+  {
+   "t": "Specflow BDD: C# Testing Mastery",
+   "s": "real.discount"
+  }
+ ],
  "last_summary": "2026-11-02"
 }

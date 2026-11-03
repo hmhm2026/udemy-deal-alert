@@ -447,6 +447,8 @@ def load_state():
     s.setdefault("kw_remove", [])       # phase 2: config keywords switched off from Telegram (/remove)
     s.setdefault("paused_until", "")    # phase 2: "" | "forever" | ISO time in UTC
     s.setdefault("tg_offset", 0)        # phase 2: next Telegram update id to read
+    s.setdefault("awaiting", "")        # phase 2: "add" | "remove" after a bare /add or /remove
+    s.setdefault("await_until", "")     # phase 2: ISO time (UTC) when that wait expires
     return s
 
 
@@ -522,6 +524,7 @@ HELP_TEXT = (
     "/list - show the keywords in use\n"
     "/add playwright, cypress - add keywords (comma separated)\n"
     "/remove jira - remove a keyword\n"
+    "(or send just /add or /remove, then send the keywords as your next message)\n"
     "/pause 6h - mute alerts for 6 hours (also 2d; plain /pause = until /resume)\n"
     "/resume - turn alerts back on\n"
     "/status - pause state and source health\n\n"
@@ -570,6 +573,26 @@ def pause_status(state, now):
         return False
 
 
+def awaiting_mode(state, now):
+    """'add' or 'remove' while the bot is waiting for keywords after a bare /add or /remove, else ''."""
+    mode = state.get("awaiting") or ""
+    try:
+        ok = mode in ("add", "remove") and now < datetime.fromisoformat(state.get("await_until") or "")
+    except ValueError:
+        ok = False
+    return mode if ok else ""
+
+
+def start_awaiting(state, mode, now):
+    state["awaiting"], state["await_until"] = mode, (now + timedelta(hours=6)).isoformat()
+    return ("✍️ Now send the keyword(s) as a normal message, for example "
+            "<code>playwright, cypress</code>\nOr send /cancel."), True
+
+
+def clear_awaiting(state):
+    state["awaiting"], state["await_until"] = "", ""
+
+
 def wrap_words(items, width=300):
     lines, cur = [], ""
     for it in items:
@@ -604,6 +627,9 @@ def handle_command(text, state, cfg, now):
     base = {k.lower() for k in cfg.get("categories", [])}
     esc = lambda items: html.escape(", ".join(items))
 
+    if cmd == "/cancel":
+        return "👌 Cancelled.", False
+
     if cmd in ("/start", "/help"):
         return HELP_TEXT, False
 
@@ -617,6 +643,8 @@ def handle_command(text, state, cfg, now):
         return "\n".join(lines), False
 
     if cmd == "/add":
+        if not arg:
+            return start_awaiting(state, "add", now)
         kws = parse_keywords(arg)
         if not kws:
             return "Usage: <code>/add playwright, cypress</code>", False
@@ -646,6 +674,8 @@ def handle_command(text, state, cfg, now):
         return "\n".join(out), bool(added or restored)
 
     if cmd == "/remove":
+        if not arg:
+            return start_awaiting(state, "remove", now)
         kws = parse_keywords(arg)
         if not kws:
             return "Usage: <code>/remove jira</code>", False
@@ -736,8 +766,17 @@ def process_commands(state, cfg, now, notify, updates):
         if not owner or str((msg.get("chat") or {}).get("id")) != owner or str((msg.get("from") or {}).get("id")) != owner:
             continue
         text = (msg.get("text") or "").strip()
-        if not text.startswith("/"):
-            continue
+        if text.startswith("/"):
+            if state.get("awaiting"):       # any new command ends the wait (a bare /add or /remove starts it again)
+                clear_awaiting(state)
+                changed = True
+        else:
+            mode = awaiting_mode(state, now)
+            if not (mode and text):         # a normal message only counts right after a bare /add or /remove
+                continue
+            clear_awaiting(state)
+            changed = True
+            text = f"/{mode} {text}"
         reply, ch = handle_command(text, state, cfg, now)
         changed |= ch
         notify(reply)

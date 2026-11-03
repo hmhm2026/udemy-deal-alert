@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "<urlopen error [Errno 111] Connection refused>"
   },
   "courson": {
    "fails": 0,
@@ -30,6 +30,14 @@
   {
    "t": "Specflow BDD: C# Testing Mastery",
    "s": "real.discount"
+  },
+  {
+   "t": "Istqb Ctal Ta V40 120 Explained Practice Questions",
+   "s": "courson"
+  },
+  {
+   "t": "Istqb Ctal Tm V30 120 Explained Practice Questions",
+   "s": "courson"
   }
  ],
  "last_summary": "2026-11-02"

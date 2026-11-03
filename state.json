@@ -44,5 +44,7 @@
  "kw_add": [],
  "kw_remove": [],
  "paused_until": "",
- "tg_offset": 795238368
+ "tg_offset": 795238372,
+ "awaiting": "",
+ "await_until": ""
 }

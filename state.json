@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 1,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error [Errno 111] Connection refused>"
+   "last_error": ""
   },
   "courson": {
    "fails": 0,
@@ -40,5 +40,9 @@
    "s": "courson"
   }
  ],
- "last_summary": "2026-11-02"
+ "last_summary": "2026-11-02",
+ "kw_add": [],
+ "kw_remove": [],
+ "paused_until": "",
+ "tg_offset": 795238368
 }

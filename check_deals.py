@@ -27,7 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -443,7 +443,15 @@ def load_state():
     s.setdefault("health", {})      # {source: {"fails": n, "alerted": bool, "last_error": str}}
     s.setdefault("sent", [])        # alerts sent since the last summary: [{"t": title, "s": source}]
     s.setdefault("last_summary", "")
+    s.setdefault("kw_add", [])          # phase 2: keywords added from Telegram (/add)
+    s.setdefault("kw_remove", [])       # phase 2: config keywords switched off from Telegram (/remove)
+    s.setdefault("paused_until", "")    # phase 2: "" | "forever" | ISO time in UTC
+    s.setdefault("tg_offset", 0)        # phase 2: next Telegram update id to read
     return s
+
+
+def save_state(state):
+    STATE_FILE.write_text(json.dumps(state, indent=1, ensure_ascii=False), encoding="utf-8")
 
 
 def update_health(state, results, cfg, notify):
@@ -506,6 +514,239 @@ def maybe_weekly_summary(state, cfg, notify, now=None):
     return True
 
 
+# ---------- phase 2: control the bot from Telegram ----------
+MAX_KW_LEN = 60
+MAX_ADDED = 200
+HELP_TEXT = (
+    "🤖 <b>Commands</b>\n"
+    "/list - show the keywords in use\n"
+    "/add playwright, cypress - add keywords (comma separated)\n"
+    "/remove jira - remove a keyword\n"
+    "/pause 6h - mute alerts for 6 hours (also 2d; plain /pause = until /resume)\n"
+    "/resume - turn alerts back on\n"
+    "/status - pause state and source health\n\n"
+    "Commands are read every few minutes, so the reply is not instant."
+)
+
+
+def norm_kw(s):
+    return re.sub(r"\s+", " ", (s or "").strip().strip("\"'`").lower())
+
+
+def parse_keywords(arg):
+    return [k for k in (norm_kw(p) for p in re.split(r"[,;\n،]", arg or "")) if k]
+
+
+def effective_keywords(cfg, state):
+    """config.json keywords, minus the ones removed from Telegram, plus the ones added from Telegram."""
+    removed = set(state.get("kw_remove", []))
+    out = [k for k in cfg.get("categories", []) if k.lower() not in removed]
+    have = {k.lower() for k in out}
+    for k in state.get("kw_add", []):
+        if k not in have:
+            out.append(k)
+            have.add(k)
+    return out
+
+
+def parse_duration(arg, now):
+    """'6h', '2d' or '6' (hours) -> UTC datetime, capped at 30 days. None if it is not a duration."""
+    m = re.fullmatch(r"(\d{1,3})\s*([hHdD]?)", (arg or "").strip())
+    if not m or int(m.group(1)) == 0:
+        return None
+    hours = int(m.group(1)) * (24 if m.group(2).lower() == "d" else 1)
+    return now + timedelta(hours=min(hours, 30 * 24))
+
+
+def pause_status(state, now):
+    p = state.get("paused_until") or ""
+    if p == "forever":
+        return True
+    if not p:
+        return False
+    try:
+        return now < datetime.fromisoformat(p)
+    except ValueError:
+        return False
+
+
+def wrap_words(items, width=300):
+    lines, cur = [], ""
+    for it in items:
+        piece = it if not cur else ", " + it
+        if cur and len(cur) + len(piece) > width:
+            lines.append(cur + ",")
+            cur, piece = "", it
+        cur += piece
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def send_long(text, silent=False):
+    """Telegram rejects messages over 4096 characters, so split on line boundaries."""
+    chunk, size = [], 0
+    for line in text.split("\n"):
+        if chunk and size + len(line) + 1 > 3800:
+            tg_send("\n".join(chunk), silent=silent, preview=False)
+            chunk, size = [], 0
+        chunk.append(line)
+        size += len(line) + 1
+    if chunk:
+        tg_send("\n".join(chunk), silent=silent, preview=False)
+
+
+def handle_command(text, state, cfg, now):
+    """Run one command from the owner. Returns (reply_html, state_changed)."""
+    parts = text.strip().split(None, 1)
+    cmd = parts[0].lower().split("@")[0]
+    arg = parts[1].strip() if len(parts) > 1 else ""
+    base = {k.lower() for k in cfg.get("categories", [])}
+    esc = lambda items: html.escape(", ".join(items))
+
+    if cmd in ("/start", "/help"):
+        return HELP_TEXT, False
+
+    if cmd == "/list":
+        eff = effective_keywords(cfg, state)
+        lines = [f"📋 <b>Keywords in use ({len(eff)})</b>"] + [html.escape(l) for l in wrap_words(eff)]
+        if state["kw_add"]:
+            lines += ["", "<b>Added by you:</b> " + esc(state["kw_add"])]
+        if state["kw_remove"]:
+            lines += ["", "<b>Removed by you:</b> " + esc(state["kw_remove"])]
+        return "\n".join(lines), False
+
+    if cmd == "/add":
+        kws = parse_keywords(arg)
+        if not kws:
+            return "Usage: <code>/add playwright, cypress</code>", False
+        added, restored, already, bad = [], [], [], []
+        for k in kws:
+            if len(k) > MAX_KW_LEN:
+                bad.append(k[:20] + "…")
+            elif k in state["kw_remove"]:
+                state["kw_remove"].remove(k)
+                restored.append(k)
+            elif k in {x.lower() for x in effective_keywords(cfg, state)}:
+                already.append(k)
+            elif len(state["kw_add"]) >= MAX_ADDED:
+                bad.append(k)
+            else:
+                state["kw_add"].append(k)
+                added.append(k)
+        out = []
+        if added:
+            out.append("✅ Added: " + esc(added))
+        if restored:
+            out.append("✅ Switched back on: " + esc(restored))
+        if already:
+            out.append("ℹ️ Already in the list: " + esc(already))
+        if bad:
+            out.append(f"⚠️ Not added (longer than {MAX_KW_LEN} characters or too many added): " + esc(bad))
+        return "\n".join(out), bool(added or restored)
+
+    if cmd == "/remove":
+        kws = parse_keywords(arg)
+        if not kws:
+            return "Usage: <code>/remove jira</code>", False
+        removed, missing = [], []
+        for k in kws:
+            if k in state["kw_add"]:
+                state["kw_add"].remove(k)
+                removed.append(k)
+            elif k in base and k not in state["kw_remove"]:
+                state["kw_remove"].append(k)
+                removed.append(k)
+            else:
+                missing.append(k)
+        out = []
+        if removed:
+            out.append("🗑 Removed: " + esc(removed))
+        if missing:
+            out.append("ℹ️ Not in the list: " + esc(missing))
+        if not effective_keywords(cfg, state):
+            out.append("⚠️ The list is empty now, so nothing will be sent until you /add a keyword.")
+        return "\n".join(out), bool(removed)
+
+    if cmd == "/pause":
+        if not arg:
+            state["paused_until"] = "forever"
+            return "⏸ Alerts paused until you send /resume.", True
+        until = parse_duration(arg, now)
+        if not until:
+            return "Usage: <code>/pause 6h</code> or <code>/pause 2d</code> (or just /pause)", False
+        state["paused_until"] = until.isoformat()
+        return f"⏸ Alerts paused until {until:%Y-%m-%d %H:%M} UTC. Send /resume to turn them on earlier.", True
+
+    if cmd == "/resume":
+        if not state.get("paused_until"):
+            return "▶️ Alerts are already on.", False
+        state["paused_until"] = ""
+        return "▶️ Alerts are on again.", True
+
+    if cmd == "/status":
+        lines = []
+        if pause_status(state, now):
+            until = state["paused_until"]
+            lines.append("⏸ Paused" + ("" if until == "forever" else f" until {until[:16].replace('T', ' ')} UTC"))
+        else:
+            lines.append("▶️ Alerts are on")
+        eff = effective_keywords(cfg, state)
+        lines.append(f"Keywords: {len(eff)} ({len(state['kw_add'])} added, {len(state['kw_remove'])} removed)")
+        for name in cfg.get("sources", list(SOURCES)):
+            h = state["health"].get(name, {})
+            lines.append(f"{'⚠️' if h.get('fails') else '✅'} {html.escape(name)}"
+                         + (f" (failing for {h['fails']} runs)" if h.get("fails") else ""))
+        return "\n".join(lines), False
+
+    return "Unknown command. Send /help to see the list.", False
+
+
+def fetch_updates(offset):
+    """New messages sent to the bot, or None if they could not be read. Never prints the token."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return None
+    url = (f"https://api.telegram.org/bot{token}/getUpdates?"
+           + urllib.parse.urlencode({"offset": offset, "timeout": 0, "allowed_updates": json.dumps(["message"])}))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=25) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        print(f"[telegram] could not read commands: HTTP {e.code}")
+        return None
+    except Exception as e:
+        print(f"[telegram] could not read commands: {type(e).__name__}")
+        return None
+    if not data.get("ok"):
+        print("[telegram] could not read commands: not ok")
+        return None
+    return data.get("result", [])
+
+
+def process_commands(state, cfg, now, notify, updates):
+    """Handle commands from the owner only (messages from anyone else are ignored). Returns True if state changed."""
+    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+    changed, last_id = False, None
+    for u in updates:
+        uid = u.get("update_id")
+        if isinstance(uid, int):
+            last_id = uid if last_id is None else max(last_id, uid)
+        msg = u.get("message") or {}
+        if not owner or str((msg.get("chat") or {}).get("id")) != owner or str((msg.get("from") or {}).get("id")) != owner:
+            continue
+        text = (msg.get("text") or "").strip()
+        if not text.startswith("/"):
+            continue
+        reply, ch = handle_command(text, state, cfg, now)
+        changed |= ch
+        notify(reply)
+    if last_id is not None:
+        state["tg_offset"] = last_id + 1
+        changed = True
+    return changed
+
+
 # ---------- main ----------
 def main():
     if "--test" in sys.argv:
@@ -523,6 +764,20 @@ def main():
     cfg = load_json(CONFIG_FILE, {})
     seen = load_json(SEEN_FILE, [])
     seen_set = set(seen)
+
+    # phase 2: read commands sent to the bot (not in --dry, so a test run never eats them)
+    now = datetime.now(timezone.utc)
+    state = load_state()
+    if not dry:
+        updates = fetch_updates(state["tg_offset"])
+        cmd_changed = process_commands(state, cfg, now, send_long, updates) if updates else False
+        if state["paused_until"] not in ("", "forever") and not pause_status(state, now):
+            state["paused_until"] = ""
+            send_long("▶️ The pause is over. Alerts are on again.")
+            cmd_changed = True
+        if cmd_changed:
+            save_state(state)   # saved right away so a later crash cannot replay the same commands
+    cfg["categories"] = effective_keywords(cfg, state)
 
     names = cfg.get("sources", list(SOURCES))
     all_deals, errors, results = [], [], {}
@@ -602,6 +857,10 @@ def main():
     print(f"{len(new)} new free coupons -> {len(loud)} interest alerts + {len(digest)} in digest "
           f"(of {len(all_deals)} items fetched, {resolves} links resolved)")
 
+    paused = pause_status(state, now)
+    if paused:
+        print("PAUSED from Telegram: nothing will be sent (new coupons are still marked as seen)")
+
     if dry:
         for d in loud:
             print("INTEREST:", d["title"], "|", d["source"], "|", d["url"])
@@ -609,7 +868,8 @@ def main():
             print("digest  :", d["title"], "|", d["source"], "|", d["url"])
         return
 
-    state = load_state()
+    if paused:
+        loud, digest = [], []
     for d in loud:
         tg_send(format_deal(d))
         state["sent"].append({"t": d["title"][:80], "s": d["source"]})

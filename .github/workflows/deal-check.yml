@@ -37,4 +37,21 @@ jobs:
           for f in seen.json state.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
-          git diff --cached --quiet || (git commit -m "update bot state" && git pull --rebase && git push)
+          if git diff --cached --quiet; then
+            echo "nothing to save"
+            exit 0
+          fi
+          git commit -m "update bot state"
+          # If someone pushed while this run was working, take their changes and put ours on top.
+          # On a clash in the state files, the bot's newest state wins. Retry a few times.
+          for i in 1 2 3 4 5; do
+            if git pull --rebase -X theirs origin main && git push origin HEAD:main; then
+              echo "state saved"
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "save attempt $i failed, retrying"
+            sleep $((i * 4))
+          done
+          echo "could not save the bot state"
+          exit 1

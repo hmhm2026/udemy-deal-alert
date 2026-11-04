@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "<urlopen error timed out>"
   },
   "courson": {
    "fails": 0,
@@ -46,6 +46,10 @@
   {
    "t": "ISTQB CTAL-AT v2.0 Advanced Agile Tester Practice Exams 2026",
    "s": "real.discount"
+  },
+  {
+   "t": "Software Testing Mastery  2025: QA Fundamentals to Expert",
+   "s": "discudemy"
   }
  ],
  "last_summary": "2026-11-02",

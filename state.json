@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 1,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error timed out>"
+   "last_error": ""
   },
   "courson": {
    "fails": 0,
@@ -50,6 +50,10 @@
   {
    "t": "Software Testing Mastery  2025: QA Fundamentals to Expert",
    "s": "discudemy"
+  },
+  {
+   "t": "Selenium Java Interview Questions 500 Qa",
+   "s": "courson"
   }
  ],
  "last_summary": "2026-11-02",

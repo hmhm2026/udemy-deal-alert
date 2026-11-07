@@ -199,5 +199,6 @@
   "digest_chunk": 10,
   "match_description": false,
   "pages_html": 3,
-  "max_resolves_per_run": 25
+  "max_resolves_per_run": 25,
+  "max_verifies_per_run": 25
 }

@@ -35,6 +35,7 @@ ROOT = Path(__file__).parent
 CONFIG_FILE = ROOT / "config.json"
 SEEN_FILE = ROOT / "seen.json"
 STATE_FILE = ROOT / "state.json"   # source health + weekly stats (committed by the workflow)
+TRACKED_FILE = ROOT / "tracked.json"  # coupons retained for periodic validity checks
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 UDEMY_RE = re.compile(r"https?://(?:www\.)?udemy\.com/course/[A-Za-z0-9_\-]+/?\?[^\s\"'<>]*couponCode=[A-Za-z0-9_.\-]+", re.I)
@@ -59,6 +60,119 @@ def http_request(url, headers=None, data=None, timeout=30):
 def http_html(url, referer=None):
     return http_request(url, headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
                                       "Referer": referer or url})
+
+
+def _zero_price_in_json(value):
+    """Look for an explicit zero price in Udemy page JSON, not generic mentions of 'free'."""
+    if isinstance(value, dict):
+        for key in ("price_text", "priceText", "discount_price_text", "discountPriceText"):
+            v = value.get(key)
+            if isinstance(v, str) and v.strip().lower() in {"free", "$0.00", "0.00", "0"}:
+                return True
+        # Udemy's page payloads and JSON-LD commonly expose an Offer price or a discount price.
+        for key in ("discount_price", "discountPrice", "price", "offers"):
+            if key in value:
+                v = value[key]
+                if key == "offers":
+                    if _zero_price_in_json(v):
+                        return True
+                elif isinstance(v, (int, float)) and v == 0:
+                    return True
+                elif isinstance(v, str) and v.strip() in {"0", "0.0", "0.00"}:
+                    return True
+                elif isinstance(v, dict):
+                    amount = v.get("amount")
+                    if amount is not None and str(amount).strip() in {"0", "0.0", "0.00"}:
+                        return True
+                    if _zero_price_in_json(v):
+                        return True
+        return any(_zero_price_in_json(v) for k, v in value.items() if k not in {
+            "price", "discount_price", "discountPrice", "offers"})
+    if isinstance(value, list):
+        return any(_zero_price_in_json(v) for v in value)
+    return False
+
+
+def _positive_price_in_json(value):
+    if isinstance(value, dict):
+        for key in ("discount_price", "discountPrice", "price", "offers"):
+            if key not in value:
+                continue
+            v = value[key]
+            if key == "offers":
+                if _positive_price_in_json(v):
+                    return True
+            elif isinstance(v, (int, float)) and v > 0:
+                return True
+            elif isinstance(v, str) and re.fullmatch(r"\d+(?:\.\d+)?", v.strip()) and float(v) > 0:
+                return True
+            elif isinstance(v, dict):
+                amount = v.get("amount")
+                if amount is not None:
+                    try:
+                        if float(amount) > 0:
+                            return True
+                    except (TypeError, ValueError):
+                        pass
+                if _positive_price_in_json(v):
+                    return True
+        return any(_positive_price_in_json(v) for k, v in value.items()
+                   if k not in {"price", "discount_price", "discountPrice", "offers"})
+    if isinstance(value, list):
+        return any(_positive_price_in_json(v) for v in value)
+    return False
+
+
+def verify_udemy_coupon(url):
+    """Conservatively verify the coupon landing page. Returns ACTIVE_FREE, NOT_FREE, or UNVERIFIED."""
+    parsed = urllib.parse.urlparse(url)
+    query = urllib.parse.parse_qs(parsed.query)
+    if parsed.hostname not in {"udemy.com", "www.udemy.com"} or not query.get("couponCode"):
+        return "UNVERIFIED"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": UA,
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=25) as response:
+            final_url = response.geturl()
+            page = response.read().decode("utf-8", errors="replace")
+        final = urllib.parse.urlparse(final_url)
+        if final.hostname not in {"udemy.com", "www.udemy.com"}:
+            return "UNVERIFIED"
+    except Exception as exc:
+        print(f"[verify] could not check Udemy coupon: {type(exc).__name__}")
+        return "UNVERIFIED"
+
+    lowered = html.unescape(page).lower()
+    expired_phrases = (
+        "coupon code has expired", "coupon has expired", "coupon code is expired",
+        "coupon code is invalid", "coupon is not valid", "coupon code is no longer valid",
+        "coupon code has reached its redemption limit", "coupon has reached its redemption limit",
+        "sorry, this coupon is no longer available",
+    )
+    if any(phrase in lowered for phrase in expired_phrases):
+        return "NOT_FREE"
+
+    # Parse JSON-LD blocks and common serialized page payloads. No clear zero-price evidence
+    # means we fail closed: never label an unverified course as free.
+    positive_price = False
+    for raw in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', page, re.I | re.S):
+        try:
+            payload = json.loads(html.unescape(raw))
+            if _zero_price_in_json(payload):
+                return "ACTIVE_FREE"
+            positive_price |= _positive_price_in_json(payload)
+        except Exception:
+            pass
+    if re.search(r'["\'](?:price_text|priceText|discount_price_text|discountPriceText)["\']\s*:\s*["\']free["\']', lowered):
+        return "ACTIVE_FREE"
+    if re.search(r'["\'](?:discount_price|discountPrice)["\']\s*:\s*\{[^{}]{0,300}["\']amount["\']\s*:\s*0(?:\.0+)?(?:[,}])', lowered):
+        return "ACTIVE_FREE"
+    if positive_price or re.search(r'["\'](?:discount_price|discountPrice)["\']\s*:\s*\{[^{}]{0,300}["\']amount["\']\s*:\s*(?!0(?:\.0+)?(?:[,}]))\d+(?:\.\d+)?', lowered):
+        return "NOT_FREE"
+    return "UNVERIFIED"
 
 
 def get_json(url, headers=None, data=None):
@@ -803,6 +917,19 @@ def main():
     cfg = load_json(CONFIG_FILE, {})
     seen = load_json(SEEN_FILE, [])
     seen_set = set(seen)
+    tracked = load_json(TRACKED_FILE, [])
+    if not isinstance(tracked, list):
+        tracked = []
+    tracked_keys = {coupon_key(x.get("url", "")) for x in tracked if isinstance(x, dict) and x.get("url")}
+    # Migrate previously seen coupon keys so older alerts also receive periodic validity checks.
+    for old_key in seen:
+        if not isinstance(old_key, str) or "|" not in old_key:
+            continue
+        slug, code = old_key.split("|", 1)
+        old_url = f"https://www.udemy.com/course/{slug}/?couponCode={urllib.parse.quote(code)}"
+        if old_key not in tracked_keys:
+            tracked.append({"title": slug.replace("-", " ").title(), "url": old_url, "source": "previously_seen"})
+            tracked_keys.add(old_key)
 
     # phase 2: read commands sent to the bot (not in --dry, so a test run never eats them)
     now = datetime.now(timezone.utc)
@@ -838,6 +965,20 @@ def main():
             print(f"[{name}] ERROR: {e}")
             errors.append(name)
 
+    # Recheck a bounded rotating batch of previously discovered coupons on every run.
+    # This prevents expired offers from remaining trusted forever without flooding Udemy.
+    max_checks = max(1, int(cfg.get("max_verifies_per_run", 25)))
+    check_batch, remainder = tracked[:max_checks], tracked[max_checks:]
+    still_tracked = []
+    for old in check_batch:
+        if not isinstance(old, dict) or not old.get("url"):
+            continue
+        verdict = verify_udemy_coupon(old["url"])
+        print(f"[recheck] {old.get('title', 'Previously seen course')[:55]}: {verdict}")
+        if verdict != "NOT_FREE":
+            still_tracked.append(old)
+    tracked = remainder + still_tracked
+
     # new, unique, passing the basic rules. Lazy items are resolved only when their title matches.
     new, batch_keys, newly_seen = [], set(), set()
     resolves, fails = 0, {}
@@ -847,16 +988,29 @@ def main():
         if ref in seen_set or ref in batch_keys:
             continue
         batch_keys.add(ref)
-        newly_seen.add(ref)
         if d["url"]:                      # direct source
-            if is_free(d, cfg):
+            if not is_free(d, cfg):
+                newly_seen.add(ref)
+                continue
+            verdict = verify_udemy_coupon(d["url"])
+            print(f"[verify] {d['title'][:55]}: {verdict}")
+            if verdict == "ACTIVE_FREE":
                 new.append(d)
+                newly_seen.add(ref)
+                if ref not in tracked_keys:
+                    tracked.append({"title": d["title"], "url": d["url"], "source": d["source"]})
+                    tracked_keys.add(ref)
+            elif verdict == "NOT_FREE":
+                newly_seen.add(ref)       # confirmed expired/paid; do not retry this coupon
+            # UNVERIFIED is deliberately not marked seen; it can be retried next run.
             continue
         # lazy source
         if not (is_free(d, cfg) and is_interest(d, cfg)):
+            newly_seen.add(ref)
             continue
         if not listing_says_free(d):
             print(f"[{d['source']}] skipped (not 100% off): {d['title'][:60]}")
+            newly_seen.add(ref)
             continue
         if resolves >= max_res or fails.get(d["source"], 0) >= 3:
             newly_seen.discard(ref)       # try again on the next run
@@ -871,15 +1025,28 @@ def main():
             continue
         time.sleep(0.3)
         if not url:
+            newly_seen.add(ref)
             continue
         key = coupon_key(url)
-        newly_seen.add(key)
         if key in seen_set or key in batch_keys:
+            newly_seen.add(ref)
             continue
         batch_keys.add(key)
         d["url"] = url
-        if is_free(d, cfg):
+        if not is_free(d, cfg):
+            newly_seen.add(ref)
+            continue
+        verdict = verify_udemy_coupon(url)
+        print(f"[verify] {d['title'][:55]}: {verdict}")
+        if verdict == "ACTIVE_FREE":
             new.append(d)
+            newly_seen.update((ref, key))
+            if key not in tracked_keys:
+                tracked.append({"title": d["title"], "url": url, "source": d["source"]})
+                tracked_keys.add(key)
+        elif verdict == "NOT_FREE":
+            newly_seen.update((ref, key))
+        # UNVERIFIED candidates remain eligible for retry on the next scheduled run.
 
     loud = [d for d in new if is_interest(d, cfg)]
     others = [d for d in new if not is_interest(d, cfg)]
@@ -930,6 +1097,7 @@ def main():
     # remember everything we looked at so nothing is repeated later
     seen = list(dict.fromkeys(seen + sorted(newly_seen)))[-8000:]
     SEEN_FILE.write_text(json.dumps(seen, indent=0), encoding="utf-8")
+    TRACKED_FILE.write_text(json.dumps(tracked[-8000:], indent=1, ensure_ascii=False), encoding="utf-8")
 
     if names and len(errors) == len(names):
         raise SystemExit("All sources failed.")

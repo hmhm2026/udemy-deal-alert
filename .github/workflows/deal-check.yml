@@ -6,7 +6,7 @@ on:
   workflow_dispatch:          # lets you run it manually from the Actions tab
 
 permissions:
-  contents: write             # needed to save seen.json / state.json back to the repo
+  contents: write             # needed to save seen.json / state.json / tracked.json back to the repo
 
 concurrency:
   group: deal-check
@@ -29,12 +29,12 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python check_deals.py
 
-      - name: Save seen.json and state.json
+      - name: Save bot state files
         if: always()
         run: |
           git config user.name "deal-bot"
           git config user.email "deal-bot@users.noreply.github.com"
-          for f in seen.json state.json; do
+          for f in seen.json state.json tracked.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --cached --quiet; then

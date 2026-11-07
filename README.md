@@ -1,7 +1,7 @@
 # Udemy Deal Alert
 
-Checks public Udemy coupon feeds every 15 minutes (GitHub Actions) and sends new
-matching deals to Telegram. Free, no server, no Udemy login.
+Checks public Udemy coupon feeds every 5 minutes (GitHub Actions; GitHub may delay scheduled runs) and sends new
+matching deals to Telegram. Free, no server, no Udemy login. New alerts are sent only when the Udemy coupon page provides clear evidence of a zero price; unclear checks are retried rather than advertised as free. Previously discovered coupon links are also rechecked in rotating batches (25 per run by default).
 
 ## Setup
 1. Create a Telegram bot with @BotFather and keep the token private.
@@ -17,6 +17,7 @@ Edit `config.json`:
 - `categories`: keywords matched against title, category and description
 - `exclude_keywords`: skip deals containing these words
 - `min_rating`: only applied when the source provides a rating
+- `max_verifies_per_run`: maximum previously discovered coupons rechecked each run (default: 25)
 
 ## Local commands
 ```

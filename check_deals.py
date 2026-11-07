@@ -141,8 +141,19 @@ def verify_udemy_coupon(url):
         final = urllib.parse.urlparse(final_url)
         if final.hostname not in {"udemy.com", "www.udemy.com"}:
             return "UNVERIFIED"
+    except urllib.error.HTTPError as exc:
+        # Keep the coupon URL private (it contains a redeemable coupon code),
+        # but expose the HTTP status so blocked/rate-limited requests are diagnosable.
+        host = urllib.parse.urlparse(url).netloc or "unknown host"
+        print(f"[verify] Udemy request rejected: HTTP {exc.code} "
+              f"{exc.reason} ({host})")
+        return "UNVERIFIED"
+    except urllib.error.URLError as exc:
+        host = urllib.parse.urlparse(url).netloc or "unknown host"
+        print(f"[verify] connection error ({host}): {exc.reason}")
+        return "UNVERIFIED"
     except Exception as exc:
-        print(f"[verify] could not check Udemy coupon: {type(exc).__name__}")
+        print(f"[verify] unexpected check error: {type(exc).__name__}: {exc}")
         return "UNVERIFIED"
 
     lowered = html.unescape(page).lower()

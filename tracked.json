@@ -1,130 +1,5 @@
 [
  {
-  "title": "Owasp Learnit",
-  "url": "https://www.udemy.com/course/owasp-learnit/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Owasp Security Learnit Es",
-  "url": "https://www.udemy.com/course/owasp-security-learnit-es/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Pcap Associate Python Programmer Exam Preparation",
-  "url": "https://www.udemy.com/course/pcap-associate-python-programmer-exam-preparation/?couponCode=B202619DF835672F125C",
-  "source": "previously_seen"
- },
- {
-  "title": "Pl 500 Microsoft Power Automate Rpa Developer Bootcamp",
-  "url": "https://www.udemy.com/course/pl-500-microsoft-power-automate-rpa-developer-bootcamp/?couponCode=NOVFREE01",
-  "source": "previously_seen"
- },
- {
-  "title": "Power Automate Desktop Course Intelligent Automation",
-  "url": "https://www.udemy.com/course/power-automate-desktop-course-intelligent-automation/?couponCode=NOVFREE01",
-  "source": "previously_seen"
- },
- {
-  "title": "Resilience Patterns Microservice Architecture Learnit",
-  "url": "https://www.udemy.com/course/resilience-patterns-microservice-architecture-learnit/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Resilience4J Spring Boot Learnit",
-  "url": "https://www.udemy.com/course/resilience4j-spring-boot-learnit/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Soa Learnit",
-  "url": "https://www.udemy.com/course/soa-learnit/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Software Architecture It Bulls",
-  "url": "https://www.udemy.com/course/software-architecture-it-bulls/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Specflow Bdd C Testing Mastery",
-  "url": "https://www.udemy.com/course/specflow-bdd-c-testing-mastery/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Uml Learnit",
-  "url": "https://www.udemy.com/course/uml-learnit/?couponCode=OCTOBERFREE2026",
-  "source": "previously_seen"
- },
- {
-  "title": "Ai In Financial Modelling",
-  "url": "https://www.udemy.com/course/ai-in-financial-modelling/?couponCode=18528C2EDB7147B99835",
-  "source": "previously_seen"
- },
- {
-  "title": "Argo Capa 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/argo-capa-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Ccna Automation 200 901 120 Practice Questions",
-  "url": "https://www.udemy.com/course/ccna-automation-200-901-120-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Ccna Cybersecurity 200 201 120 Practice Questions",
-  "url": "https://www.udemy.com/course/ccna-cybersecurity-200-201-120-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Cgeit 120 Explained Governance Practice Questions",
-  "url": "https://www.udemy.com/course/cgeit-120-explained-governance-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Cisco Ccst Cybersecurity 100 160 120 Practice Questions",
-  "url": "https://www.udemy.com/course/cisco-ccst-cybersecurity-100-160-120-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Cisco Dcaci 300 620 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/cisco-dcaci-300-620-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Cisco Enauto 300 435 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/cisco-enauto-300-435-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Cisco Spcor 350 501 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/cisco-spcor-350-501-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Excel Associate Mo 210 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/excel-associate-mo-210-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Excel Expert Mo 211 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/excel-expert-mo-211-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Finops Practitioner 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/finops-practitioner-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Github Gh 500 120 Explained Security Practice Questions",
-  "url": "https://www.udemy.com/course/github-gh-500-120-explained-security-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
-  "title": "Istqb Ctal Ta V40 120 Explained Practice Questions",
-  "url": "https://www.udemy.com/course/istqb-ctal-ta-v40-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
-  "source": "previously_seen"
- },
- {
   "title": "Istqb Ctal Tm V30 120 Explained Practice Questions",
   "url": "https://www.udemy.com/course/istqb-ctal-tm-v30-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
   "source": "previously_seen"
@@ -9707,6 +9582,131 @@
  {
   "title": "Oracle Java 17 Ocp Certification Learnit",
   "url": "https://www.udemy.com/course/oracle-java-17-ocp-certification-learnit/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Owasp Learnit",
+  "url": "https://www.udemy.com/course/owasp-learnit/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Owasp Security Learnit Es",
+  "url": "https://www.udemy.com/course/owasp-security-learnit-es/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Pcap Associate Python Programmer Exam Preparation",
+  "url": "https://www.udemy.com/course/pcap-associate-python-programmer-exam-preparation/?couponCode=B202619DF835672F125C",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Pl 500 Microsoft Power Automate Rpa Developer Bootcamp",
+  "url": "https://www.udemy.com/course/pl-500-microsoft-power-automate-rpa-developer-bootcamp/?couponCode=NOVFREE01",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Power Automate Desktop Course Intelligent Automation",
+  "url": "https://www.udemy.com/course/power-automate-desktop-course-intelligent-automation/?couponCode=NOVFREE01",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Resilience Patterns Microservice Architecture Learnit",
+  "url": "https://www.udemy.com/course/resilience-patterns-microservice-architecture-learnit/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Resilience4J Spring Boot Learnit",
+  "url": "https://www.udemy.com/course/resilience4j-spring-boot-learnit/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Soa Learnit",
+  "url": "https://www.udemy.com/course/soa-learnit/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Software Architecture It Bulls",
+  "url": "https://www.udemy.com/course/software-architecture-it-bulls/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Specflow Bdd C Testing Mastery",
+  "url": "https://www.udemy.com/course/specflow-bdd-c-testing-mastery/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Uml Learnit",
+  "url": "https://www.udemy.com/course/uml-learnit/?couponCode=OCTOBERFREE2026",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Ai In Financial Modelling",
+  "url": "https://www.udemy.com/course/ai-in-financial-modelling/?couponCode=18528C2EDB7147B99835",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Argo Capa 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/argo-capa-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Ccna Automation 200 901 120 Practice Questions",
+  "url": "https://www.udemy.com/course/ccna-automation-200-901-120-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Ccna Cybersecurity 200 201 120 Practice Questions",
+  "url": "https://www.udemy.com/course/ccna-cybersecurity-200-201-120-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Cgeit 120 Explained Governance Practice Questions",
+  "url": "https://www.udemy.com/course/cgeit-120-explained-governance-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Cisco Ccst Cybersecurity 100 160 120 Practice Questions",
+  "url": "https://www.udemy.com/course/cisco-ccst-cybersecurity-100-160-120-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Cisco Dcaci 300 620 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/cisco-dcaci-300-620-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Cisco Enauto 300 435 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/cisco-enauto-300-435-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Cisco Spcor 350 501 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/cisco-spcor-350-501-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Excel Associate Mo 210 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/excel-associate-mo-210-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Excel Expert Mo 211 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/excel-expert-mo-211-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Finops Practitioner 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/finops-practitioner-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Github Gh 500 120 Explained Security Practice Questions",
+  "url": "https://www.udemy.com/course/github-gh-500-120-explained-security-practice-questions/?couponCode=CLOUDPUZ-NOV03",
+  "source": "previously_seen"
+ },
+ {
+  "title": "Istqb Ctal Ta V40 120 Explained Practice Questions",
+  "url": "https://www.udemy.com/course/istqb-ctal-ta-v40-120-explained-practice-questions/?couponCode=CLOUDPUZ-NOV03",
   "source": "previously_seen"
  }
 ]

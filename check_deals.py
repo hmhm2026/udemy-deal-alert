@@ -544,6 +544,8 @@ def format_deal(d):
     if d["rating"]:
         lines.append(f"⭐ {d['rating']:.1f}")
     lines.append(f"🔗 {html.escape(d['url'])}")
+    if d.get("unverified"):
+        lines.append("⚠️ Not verified (Udemy blocked the check) - may have expired")
     lines.append(f"<i>via {d['source']}</i>")
     return "\n".join(lines)
 
@@ -932,15 +934,6 @@ def main():
     if not isinstance(tracked, list):
         tracked = []
     tracked_keys = {coupon_key(x.get("url", "")) for x in tracked if isinstance(x, dict) and x.get("url")}
-    # Migrate previously seen coupon keys so older alerts also receive periodic validity checks.
-    for old_key in seen:
-        if not isinstance(old_key, str) or "|" not in old_key:
-            continue
-        slug, code = old_key.split("|", 1)
-        old_url = f"https://www.udemy.com/course/{slug}/?couponCode={urllib.parse.quote(code)}"
-        if old_key not in tracked_keys:
-            tracked.append({"title": slug.replace("-", " ").title(), "url": old_url, "source": "previously_seen"})
-            tracked_keys.add(old_key)
 
     # phase 2: read commands sent to the bot (not in --dry, so a test run never eats them)
     now = datetime.now(timezone.utc)
@@ -978,7 +971,7 @@ def main():
 
     # Recheck a bounded rotating batch of previously discovered coupons on every run.
     # This prevents expired offers from remaining trusted forever without flooding Udemy.
-    max_checks = max(1, int(cfg.get("max_verifies_per_run", 25)))
+    max_checks = max(1, int(cfg.get("max_rechecks_per_run", 5)))
     check_batch, remainder = tracked[:max_checks], tracked[max_checks:]
     still_tracked = []
     for old in check_batch:
@@ -992,7 +985,8 @@ def main():
 
     # new, unique, passing the basic rules. Lazy items are resolved only when their title matches.
     new, batch_keys, newly_seen = [], set(), set()
-    resolves, fails = 0, {}
+    resolves, fails, verifies = 0, {}, 0
+    max_ver = cfg.get("max_verifies_per_run", 25)
     max_res = cfg.get("max_resolves_per_run", 25)
     for d in all_deals:
         ref = deal_ref(d)
@@ -1000,20 +994,21 @@ def main():
             continue
         batch_keys.add(ref)
         if d["url"]:                      # direct source
-            if not is_free(d, cfg):
+            if not (is_free(d, cfg) and is_interest(d, cfg)):
                 newly_seen.add(ref)
                 continue
-            verdict = verify_udemy_coupon(d["url"])
+            verdict = verify_udemy_coupon(d["url"]) if verifies < max_ver else "UNVERIFIED"
+            verifies += 1
             print(f"[verify] {d['title'][:55]}: {verdict}")
-            if verdict == "ACTIVE_FREE":
-                new.append(d)
-                newly_seen.add(ref)
-                if ref not in tracked_keys:
-                    tracked.append({"title": d["title"], "url": d["url"], "source": d["source"]})
-                    tracked_keys.add(ref)
-            elif verdict == "NOT_FREE":
+            if verdict == "NOT_FREE":
                 newly_seen.add(ref)       # confirmed expired/paid; do not retry this coupon
-            # UNVERIFIED is deliberately not marked seen; it can be retried next run.
+                continue
+            d["unverified"] = verdict != "ACTIVE_FREE"   # Udemy often blocks the check (HTTP 403): still send it
+            new.append(d)
+            newly_seen.add(ref)
+            if ref not in tracked_keys:
+                tracked.append({"title": d["title"], "url": d["url"], "source": d["source"]})
+                tracked_keys.add(ref)
             continue
         # lazy source
         if not (is_free(d, cfg) and is_interest(d, cfg)):
@@ -1047,17 +1042,17 @@ def main():
         if not is_free(d, cfg):
             newly_seen.add(ref)
             continue
-        verdict = verify_udemy_coupon(url)
+        verdict = verify_udemy_coupon(url) if verifies < max_ver else "UNVERIFIED"
+        verifies += 1
         print(f"[verify] {d['title'][:55]}: {verdict}")
-        if verdict == "ACTIVE_FREE":
-            new.append(d)
-            newly_seen.update((ref, key))
-            if key not in tracked_keys:
-                tracked.append({"title": d["title"], "url": url, "source": d["source"]})
-                tracked_keys.add(key)
-        elif verdict == "NOT_FREE":
-            newly_seen.update((ref, key))
-        # UNVERIFIED candidates remain eligible for retry on the next scheduled run.
+        newly_seen.update((ref, key))
+        if verdict == "NOT_FREE":
+            continue
+        d["unverified"] = verdict != "ACTIVE_FREE"
+        new.append(d)
+        if key not in tracked_keys:
+            tracked.append({"title": d["title"], "url": url, "source": d["source"]})
+            tracked_keys.add(key)
 
     loud = [d for d in new if is_interest(d, cfg)]
     others = [d for d in new if not is_interest(d, cfg)]

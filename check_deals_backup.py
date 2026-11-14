@@ -1,0 +1,1107 @@
+#!/usr/bin/env python3
+"""Udemy Deal Alert.
+
+Fetches public Udemy coupon feeds and sends every NEW 100%-off course that matches
+your keywords to Telegram. Uses only the Python standard library.
+Secrets (GitHub Secrets / env vars): TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+Sources come in two kinds:
+  * direct  - the feed already contains the Udemy coupon link (real.discount, courson)
+  * lazy    - the feed lists titles only; the coupon link needs one more request, so it is
+              fetched ONLY for titles that match your keywords (discudemy, udemyfreebies,
+              idownloadcoupon)
+
+Usage:
+  python check_deals.py          # normal run
+  python check_deals.py --test   # send a test Telegram message only
+  python check_deals.py --dry    # fetch + filter, print results, no Telegram, no seen.json update
+  python check_deals.py --raw    # like --dry but also prints every fetched item
+"""
+import html
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import Counter
+from datetime import date, datetime, timedelta, timezone
+from html.parser import HTMLParser
+from pathlib import Path
+
+ROOT = Path(__file__).parent
+CONFIG_FILE = ROOT / "config.json"
+SEEN_FILE = ROOT / "seen.json"
+STATE_FILE = ROOT / "state.json"   # source health + weekly stats (committed by the workflow)
+TRACKED_FILE = ROOT / "tracked.json"  # coupons retained for periodic validity checks
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+UDEMY_RE = re.compile(r"https?://(?:www\.)?udemy\.com/course/[A-Za-z0-9_\-]+/?\?[^\s\"'<>]*couponCode=[A-Za-z0-9_.\-]+", re.I)
+UDEMY_ENC_RE = re.compile(r"https?%3A%2F%2F(?:www\.)?udemy\.com%2Fcourse%2F[^\s\"'<>&]+", re.I)
+# language tags such as [ES] [DE] [PT] [UA] [PL+] and non-Latin scripts (Arabic is kept)
+LANG_TAG_RE = re.compile(r"\[(?:ES|DE|FR|PT|BR|PL|UA|RU|RO|ID|IT|TR|NL|JA|KO|ZH|HI|VI|TH)\+?\]", re.I)
+FOREIGN_SCRIPT_RE = re.compile(r"[Ѐ-ӿऀ-ॿ฀-๿぀-ヿ一-鿿가-힯]")
+
+
+# ---------- helpers ----------
+def http_request(url, headers=None, data=None, timeout=30):
+    h = {"User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9"}
+    h.update(headers or {})
+    req = urllib.request.Request(url, headers=h, data=data)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code} from {urllib.parse.urlparse(url).netloc}") from None
+
+
+def http_html(url, referer=None):
+    return http_request(url, headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                                      "Referer": referer or url})
+
+
+def _zero_price_in_json(value):
+    """Look for an explicit zero price in Udemy page JSON, not generic mentions of 'free'."""
+    if isinstance(value, dict):
+        for key in ("price_text", "priceText", "discount_price_text", "discountPriceText"):
+            v = value.get(key)
+            if isinstance(v, str) and v.strip().lower() in {"free", "$0.00", "0.00", "0"}:
+                return True
+        # Udemy's page payloads and JSON-LD commonly expose an Offer price or a discount price.
+        for key in ("discount_price", "discountPrice", "price", "offers"):
+            if key in value:
+                v = value[key]
+                if key == "offers":
+                    if _zero_price_in_json(v):
+                        return True
+                elif isinstance(v, (int, float)) and v == 0:
+                    return True
+                elif isinstance(v, str) and v.strip() in {"0", "0.0", "0.00"}:
+                    return True
+                elif isinstance(v, dict):
+                    amount = v.get("amount")
+                    if amount is not None and str(amount).strip() in {"0", "0.0", "0.00"}:
+                        return True
+                    if _zero_price_in_json(v):
+                        return True
+        return any(_zero_price_in_json(v) for k, v in value.items() if k not in {
+            "price", "discount_price", "discountPrice", "offers"})
+    if isinstance(value, list):
+        return any(_zero_price_in_json(v) for v in value)
+    return False
+
+
+def _positive_price_in_json(value):
+    if isinstance(value, dict):
+        for key in ("discount_price", "discountPrice", "price", "offers"):
+            if key not in value:
+                continue
+            v = value[key]
+            if key == "offers":
+                if _positive_price_in_json(v):
+                    return True
+            elif isinstance(v, (int, float)) and v > 0:
+                return True
+            elif isinstance(v, str) and re.fullmatch(r"\d+(?:\.\d+)?", v.strip()) and float(v) > 0:
+                return True
+            elif isinstance(v, dict):
+                amount = v.get("amount")
+                if amount is not None:
+                    try:
+                        if float(amount) > 0:
+                            return True
+                    except (TypeError, ValueError):
+                        pass
+                if _positive_price_in_json(v):
+                    return True
+        return any(_positive_price_in_json(v) for k, v in value.items()
+                   if k not in {"price", "discount_price", "discountPrice", "offers"})
+    if isinstance(value, list):
+        return any(_positive_price_in_json(v) for v in value)
+    return False
+
+
+def verify_udemy_coupon(url):
+    """Conservatively verify the coupon landing page. Returns ACTIVE_FREE, NOT_FREE, or UNVERIFIED."""
+    parsed = urllib.parse.urlparse(url)
+    query = urllib.parse.parse_qs(parsed.query)
+    if parsed.hostname not in {"udemy.com", "www.udemy.com"} or not query.get("couponCode"):
+        return "UNVERIFIED"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": UA,
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=25) as response:
+            final_url = response.geturl()
+            page = response.read().decode("utf-8", errors="replace")
+        final = urllib.parse.urlparse(final_url)
+        if final.hostname not in {"udemy.com", "www.udemy.com"}:
+            return "UNVERIFIED"
+    except Exception as exc:
+        print(f"[verify] could not check Udemy coupon: {type(exc).__name__}")
+        return "UNVERIFIED"
+
+    lowered = html.unescape(page).lower()
+    expired_phrases = (
+        "coupon code has expired", "coupon has expired", "coupon code is expired",
+        "coupon code is invalid", "coupon is not valid", "coupon code is no longer valid",
+        "coupon code has reached its redemption limit", "coupon has reached its redemption limit",
+        "sorry, this coupon is no longer available",
+    )
+    if any(phrase in lowered for phrase in expired_phrases):
+        return "NOT_FREE"
+
+    # Parse JSON-LD blocks and common serialized page payloads. No clear zero-price evidence
+    # means we fail closed: never label an unverified course as free.
+    positive_price = False
+    for raw in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', page, re.I | re.S):
+        try:
+            payload = json.loads(html.unescape(raw))
+            if _zero_price_in_json(payload):
+                return "ACTIVE_FREE"
+            positive_price |= _positive_price_in_json(payload)
+        except Exception:
+            pass
+    if re.search(r'["\'](?:price_text|priceText|discount_price_text|discountPriceText)["\']\s*:\s*["\']free["\']', lowered):
+        return "ACTIVE_FREE"
+    if re.search(r'["\'](?:discount_price|discountPrice)["\']\s*:\s*\{[^{}]{0,300}["\']amount["\']\s*:\s*0(?:\.0+)?(?:[,}])', lowered):
+        return "ACTIVE_FREE"
+    if positive_price or re.search(r'["\'](?:discount_price|discountPrice)["\']\s*:\s*\{[^{}]{0,300}["\']amount["\']\s*:\s*(?!0(?:\.0+)?(?:[,}]))\d+(?:\.\d+)?', lowered):
+        return "NOT_FREE"
+    return "UNVERIFIED"
+
+
+def get_json(url, headers=None, data=None):
+    body = http_request(url, headers=headers, data=data)
+    try:
+        return json.loads(body)
+    except ValueError:
+        raise RuntimeError(f"not JSON from {urllib.parse.urlparse(url).netloc}; starts with: {body[:120]!r}") from None
+
+
+def load_json(path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def find_udemy_url(text):
+    """Return a clean udemy.com course URL with couponCode found inside text, or ''."""
+    if not text:
+        return ""
+    text = html.unescape(str(text))
+    m = UDEMY_RE.search(text)
+    if m:
+        return m.group(0)
+    m = UDEMY_ENC_RE.search(text)  # affiliate wrapper such as linksynergy ...&murl=<encoded udemy url>
+    if m:
+        decoded = urllib.parse.unquote(m.group(0))
+        if "couponCode=" in decoded:
+            return decoded
+    return ""
+
+
+def coupon_key(url):
+    """Stable id: course slug + coupon code."""
+    p = urllib.parse.urlparse(url)
+    slug = p.path.strip("/").split("/")[-1].lower()
+    code = urllib.parse.parse_qs(p.query).get("couponCode", [""])[0]
+    return f"{slug}|{code}"
+
+
+def strip_tags(s):
+    return re.sub(r"<[^>]+>", " ", html.unescape(s or "")).strip()
+
+
+def to_float(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def deal(title, url, source, discount=100, categories=None, text="", rating=None, ref="", resolve=None):
+    return {"title": html.unescape(title or "").strip(), "url": url, "discount": discount,
+            "categories": [c for c in (categories or []) if c], "text": (text or "")[:500],
+            "rating": rating, "source": source, "ref": ref, "resolve": resolve,
+            "evidence": "", "trust_free": True}
+
+
+def lazy_deal(title, ref, source, resolve, evidence="", trust_free=True):
+    """Listing item whose Udemy coupon link is fetched later (only if the title matches).
+
+    evidence   - listing text that may state the discount (e.g. '25% OFF')
+    trust_free - True if the site only lists 100% coupons; False if it mixes in partial discounts
+    """
+    d = deal(title, "", source, 100, [], "", None, ref, resolve)
+    d["evidence"], d["trust_free"] = evidence or "", trust_free
+    return d
+
+
+def discount_percents(text):
+    """All percentages that are written as a discount ('25% off', 'discount 80%', '100 % OFF')."""
+    t = html.unescape(text or "")
+    found = re.findall(r"(\d{1,3})\s*%\s*(?:off|discount)", t, re.I)
+    found += re.findall(r"(?:off|discount)\s*(?:of\s*)?:?\s*(\d{1,3})\s*%", t, re.I)
+    return [int(x) for x in found]
+
+
+def listing_says_free(d):
+    """Decide from the listing text only (before spending a request on the coupon link)."""
+    text = d["title"] + " " + d["evidence"]
+    pcts = discount_percents(text)
+    if 100 in pcts:
+        return True
+    if pcts:                      # only partial discounts mentioned, e.g. 25% off
+        return False
+    if re.search(r"\bfree\b", text, re.I):
+        return True
+    return d["trust_free"]        # no information: trust sites that list only free coupons
+
+
+def deal_ref(d):
+    return coupon_key(d["url"]) if d["url"] else d["ref"]
+
+
+class AnchorParser(HTMLParser):
+    """Collects <a class="...token..."> anchors with their text and any <img alt>."""
+
+    def __init__(self, class_token):
+        super().__init__()
+        self.tok, self.items, self._cur = class_token, [], None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "a" and self.tok in (a.get("class") or "").split():
+            self._cur = {"href": a.get("href") or "", "text": "", "alt": ""}
+        elif tag == "img" and self._cur is not None:
+            self._cur["alt"] = a.get("alt") or self._cur["alt"]
+
+    def handle_data(self, data):
+        if self._cur is not None:
+            self._cur["text"] += data
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._cur is not None:
+            self.items.append(self._cur)
+            self._cur = None
+
+
+def anchors(page_html, class_token):
+    p = AnchorParser(class_token)
+    p.feed(page_html)
+    return p.items
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def redirect_location(url):
+    """Return the Location header of a redirect without following it."""
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        urllib.request.build_opener(_NoRedirect).open(req, timeout=30)
+        return ""
+    except urllib.error.HTTPError as e:
+        return urllib.parse.unquote(e.headers.get("Location") or "")
+
+
+# ---------- direct sources (feed already has the coupon link) ----------
+def source_realdiscount(cfg):
+    """real.discount public JSON (free coupons only), several pages."""
+    out = []
+    for page in range(1, cfg.get("pages", 2) + 1):
+        url = ("https://cdn.real.discount/api/courses?page=%d&limit=100&sortBy=sale_start"
+               "&store=Udemy&freeOnly=true" % page)
+        try:
+            data = get_json(url, headers={"Referer": "https://www.real.discount/",
+                                          "Origin": "https://www.real.discount"})
+        except Exception as e:
+            if page == 1:
+                raise
+            print(f"[realdiscount] page {page} skipped: {e}")
+            break
+        items = data.get("items") or data.get("results") or data.get("data") or []
+        if not items:
+            break
+        for it in items:
+            if str(it.get("store", "")).lower() == "sponsored":
+                continue
+            link = find_udemy_url(json.dumps(it, ensure_ascii=False).replace("\\/", "/"))
+            if not link:
+                continue
+            cat = it.get("category") or it.get("subcategory") or ""
+            out.append(deal(it.get("name") or it.get("title"), link, "real.discount", 100,
+                            [cat] if isinstance(cat, str) else list(cat),
+                            strip_tags(it.get("shoer_description") or it.get("description") or ""),
+                            to_float(it.get("rating"))))
+    return out
+
+
+def source_courson(cfg):
+    """courson.xyz JSON endpoint used by its 'load more' button (30 per page)."""
+    out = []
+    for page in range(1, cfg.get("pages", 2) + 1):
+        try:
+            data = get_json("https://courson.xyz/load-more-coupons",
+                            headers={"Content-Type": "application/json", "Referer": "https://courson.xyz/coupons",
+                                     "Origin": "https://courson.xyz"},
+                            data=json.dumps({"filters": {}, "offset": (page - 1) * 30}).encode())
+        except Exception as e:
+            if page == 1:
+                raise
+            print(f"[courson] page {page} skipped: {e}")
+            break
+        coupons = data.get("coupons", [])
+        if not coupons:
+            break
+        for c in coupons:
+            slug, code = c.get("id_name"), c.get("coupon_code")
+            if not slug or not code:
+                continue
+            cats = [c.get("category"), c.get("subcategory"), c.get("topic")]
+            headline = c.get("headline") or ""
+            title = headline if 0 < len(headline) <= 100 else slug.replace("-", " ").title()
+            out.append(deal(title, f"https://www.udemy.com/course/{slug}/?couponCode={code}",
+                            "courson", 100, [x for x in cats if isinstance(x, str)],
+                            headline + " " + (c.get("description") or ""), to_float(c.get("rating"))))
+    return out
+
+
+# ---------- lazy sources (titles first, coupon link only for matching titles) ----------
+def source_discudemy(cfg):
+    out = []
+    for page in range(1, cfg.get("pages_html", 3) + 1):
+        try:
+            page_html = http_html(f"https://www.discudemy.com/all/{page}", "https://www.discudemy.com")
+        except Exception:
+            if page == 1:
+                raise
+            break
+        found = anchors(page_html, "card-header")
+        if not found:
+            break
+        for it in found:
+            gid = it["href"].rstrip("/").split("/")[-1]
+            title = html.unescape(it["text"]).strip()
+            if gid and title:
+                out.append(lazy_deal(title, f"discudemy:{gid}", "discudemy",
+                                     lambda g=gid: find_udemy_url(http_html(f"https://www.discudemy.com/go/{g}",
+                                                                           "https://www.discudemy.com"))))
+    return out
+
+
+def source_udemyfreebies(cfg):
+    out = []
+
+    def resolve(slug):
+        req = urllib.request.Request(f"https://www.udemyfreebies.com/out/{slug}", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:  # follows the redirect to Udemy
+            return find_udemy_url(r.geturl()) or find_udemy_url(r.read().decode("utf-8", "replace"))
+
+    for page in range(1, cfg.get("pages_html", 3) + 1):
+        try:
+            page_html = http_html(f"https://www.udemyfreebies.com/free-udemy-courses/{page}")
+        except Exception:
+            if page == 1:
+                raise
+            break
+        found = anchors(page_html, "theme-img")
+        if not found:
+            break
+        for it in found:
+            parts = it["href"].split("/")
+            slug = parts[4] if len(parts) > 4 else ""
+            title = html.unescape(it["alt"] or it["text"]).strip()
+            if slug and title:
+                out.append(lazy_deal(title, f"udemyfreebies:{slug}", "udemyfreebies", lambda s=slug: resolve(s)))
+    return out
+
+
+def source_idownloadcoupon(cfg):
+    out = []
+    use_cat = True  # the category id may have changed on the site; fall back to no category if empty
+    for page in range(1, cfg.get("pages_html", 3) + 1):
+        params = {"per_page": 100, "page": page}
+        if use_cat:
+            params["product_cat"] = 15
+        try:
+            posts = get_json("https://idownloadcoupon.com/wp-json/wp/v2/product?" + urllib.parse.urlencode(params))
+            if page == 1 and use_cat and not posts:
+                use_cat = False
+                posts = get_json("https://idownloadcoupon.com/wp-json/wp/v2/product?"
+                                 + urllib.parse.urlencode({"per_page": 100, "page": 1}))
+        except Exception:
+            if page == 1:
+                raise
+            break
+        if not posts:
+            break
+        for p in posts:
+            pid = p.get("id")
+            title = strip_tags((p.get("title") or {}).get("rendered", ""))
+            if pid and title:
+                evidence = strip_tags(((p.get("excerpt") or {}).get("rendered", "")) + " "
+                                      + ((p.get("content") or {}).get("rendered", "")))
+                # this site also lists partial discounts, so a coupon counts as free only if it says so
+                out.append(lazy_deal(title, f"idownloadcoupon:{pid}", "idownloadcoupon",
+                                     lambda i=pid: find_udemy_url(redirect_location(f"https://idownloadcoupon.com/udemy/{i}/")),
+                                     evidence=evidence, trust_free=False))
+    return out
+
+
+SOURCES = {
+    "realdiscount": source_realdiscount,
+    "courson": source_courson,
+    "discudemy": source_discudemy,
+    "udemyfreebies": source_udemyfreebies,
+    "idownloadcoupon": source_idownloadcoupon,
+}
+
+
+# ---------- filtering ----------
+def haystack(d, cfg):
+    slug = urllib.parse.urlparse(d["url"]).path.strip("/").split("/")[-1].replace("-", " ") if d["url"] else ""
+    parts = [d["title"], " ".join(d["categories"]), slug]
+    if cfg.get("match_description", False):
+        parts.append(d["text"])
+    return " ".join(parts).lower()
+
+
+def is_free(d, cfg):
+    """Passes the basic rules: discount, rating, exclusions, language."""
+    disc = d["discount"]
+    if disc is None or disc < cfg.get("min_discount", 100):
+        return False
+    min_rating = cfg.get("min_rating", 0)
+    if min_rating and d["rating"] is not None and d["rating"] < min_rating:
+        return False
+    hay = haystack(d, cfg)
+    if any(bad.lower() in hay for bad in cfg.get("exclude_keywords", [])):
+        return False
+    if cfg.get("skip_other_languages", True):
+        if LANG_TAG_RE.search(d["title"]) or FOREIGN_SCRIPT_RE.search(d["title"]):
+            return False
+    return True
+
+
+def is_interest(d, cfg):
+    kws = [k.lower() for k in cfg.get("categories", [])]
+    hay = haystack(d, cfg)
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", hay) for k in kws)
+
+
+def in_digest_categories(d, cfg):
+    allowed = [c.lower() for c in cfg.get("digest_categories", [])]
+    if not allowed:
+        return True
+    return any(c.lower() in allowed for c in d["categories"])
+
+
+# ---------- telegram ----------
+def tg_send(text, silent=False, preview=True):
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        raise SystemExit("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variable.")
+    body = urllib.parse.urlencode({
+        "chat_id": chat, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": "false" if preview else "true",
+        "disable_notification": "true" if silent else "false",
+    }).encode()
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=body)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"Telegram error HTTP {e.code} (check token / chat id)") from None
+    time.sleep(0.5)  # stay well under Telegram rate limits
+
+
+def format_deal(d):
+    cat = ", ".join(c for c in d["categories"] if c)[:80]
+    lines = [f"🎓 <b>{html.escape(d['title'])}</b>", "💸 FREE (100% off)"]
+    if cat:
+        lines.append(f"🏷 {html.escape(cat)}")
+    if d["rating"]:
+        lines.append(f"⭐ {d['rating']:.1f}")
+    lines.append(f"🔗 {html.escape(d['url'])}")
+    lines.append(f"<i>via {d['source']}</i>")
+    return "\n".join(lines)
+
+
+def format_digest(items, start, total, extra_dropped):
+    lines = [f"📚 <b>More free courses</b> ({start + 1}-{start + len(items)} of {total})", ""]
+    for i, d in enumerate(items, start + 1):
+        cat = d["categories"][0] if d["categories"] else ""
+        title = html.escape(d["title"][:90])
+        href = html.escape(d["url"], quote=True)
+        lines.append(f'{i}. <a href="{href}">{title}</a>' + (f" · {html.escape(cat)}" if cat else ""))
+    if extra_dropped:
+        lines += ["", f"<i>+{extra_dropped} more not shown (limit per run)</i>"]
+    return "\n".join(lines)
+
+
+# ---------- phase 1: source health + weekly summary ----------
+def load_state():
+    s = load_json(STATE_FILE, {})
+    if not isinstance(s, dict):
+        s = {}
+    s.setdefault("health", {})      # {source: {"fails": n, "alerted": bool, "last_error": str}}
+    s.setdefault("sent", [])        # alerts sent since the last summary: [{"t": title, "s": source}]
+    s.setdefault("last_summary", "")
+    s.setdefault("kw_add", [])          # phase 2: keywords added from Telegram (/add)
+    s.setdefault("kw_remove", [])       # phase 2: config keywords switched off from Telegram (/remove)
+    s.setdefault("paused_until", "")    # phase 2: "" | "forever" | ISO time in UTC
+    s.setdefault("tg_offset", 0)        # phase 2: next Telegram update id to read
+    s.setdefault("awaiting", "")        # phase 2: "add" | "remove" after a bare /add or /remove
+    s.setdefault("await_until", "")     # phase 2: ISO time (UTC) when that wait expires
+    return s
+
+
+def save_state(state):
+    STATE_FILE.write_text(json.dumps(state, indent=1, ensure_ascii=False), encoding="utf-8")
+
+
+def update_health(state, results, cfg, notify):
+    """Count consecutive bad runs per source; alert once after N, and again when it recovers.
+
+    Healthy runs change nothing, so they never create a commit. Returns True if state changed."""
+    limit = cfg.get("health_alert_after_runs", 12)   # 12 runs ~ 1 hour at a 5-minute schedule
+    changed = False
+    for name, (count, err) in results.items():
+        h = state["health"].setdefault(name, {"fails": 0, "alerted": False, "last_error": ""})
+        if err or count == 0:
+            h["fails"] += 1
+            h["last_error"] = err or "returned 0 items"
+            changed = True
+            if h["fails"] >= limit and not h["alerted"]:
+                notify(f"⚠️ Source <b>{html.escape(name)}</b> has failed {h['fails']} runs in a row.\n"
+                       f"Last problem: {html.escape(h['last_error'])[:200]}")
+                h["alerted"] = True
+        elif h["fails"] or h["alerted"]:
+            if h["alerted"]:
+                notify(f"✅ Source <b>{html.escape(name)}</b> is working again.")
+            h["fails"], h["alerted"], h["last_error"] = 0, False, ""
+            changed = True
+    return changed
+
+
+def build_summary(state, cfg):
+    sent = state.get("sent", [])
+    lines = ["📊 <b>Weekly summary</b>", f"Courses sent: {len(sent)}"]
+    by_source = Counter(x.get("s", "?") for x in sent)
+    if by_source:
+        lines.append("By source: " + ", ".join(f"{s} {n}" for s, n in by_source.most_common()))
+    for x in sent[-15:]:
+        lines.append(f"• {html.escape(x.get('t', ''))}")
+    if len(sent) > 15:
+        lines.append(f"<i>(+{len(sent) - 15} more)</i>")
+    lines.append("")
+    lines.append("<b>Sources</b>")
+    for name in cfg.get("sources", list(SOURCES)):
+        h = state["health"].get(name, {})
+        lines.append(f"{'⚠️' if h.get('fails') else '✅'} {html.escape(name)}"
+                     + (f" (failing for {h['fails']} runs)" if h.get("fails") else ""))
+    return "\n".join(lines)
+
+
+def maybe_weekly_summary(state, cfg, notify, now=None):
+    """Send the summary when due. The first ever run only records today's date. Returns True if state changed."""
+    now = now or datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    last = state.get("last_summary")
+    if not last:
+        state["last_summary"] = today
+        return True
+    if (date.fromisoformat(today) - date.fromisoformat(last)).days < cfg.get("summary_every_days", 7):
+        return False
+    if now.hour < cfg.get("summary_hour_utc", 7):      # 7 UTC = 9:00 in Egypt
+        return False
+    notify(build_summary(state, cfg))
+    state["sent"], state["last_summary"] = [], today
+    return True
+
+
+# ---------- phase 2: control the bot from Telegram ----------
+MAX_KW_LEN = 60
+MAX_ADDED = 200
+HELP_TEXT = (
+    "🤖 <b>Commands</b>\n"
+    "/list - show the keywords in use\n"
+    "/add playwright, cypress - add keywords (comma separated)\n"
+    "/remove jira - remove a keyword\n"
+    "(or send just /add or /remove, then send the keywords as your next message)\n"
+    "/pause 6h - mute alerts for 6 hours (also 2d; plain /pause = until /resume)\n"
+    "/resume - turn alerts back on\n"
+    "/status - pause state and source health\n\n"
+    "Commands are read every few minutes, so the reply is not instant."
+)
+
+
+def norm_kw(s):
+    return re.sub(r"\s+", " ", (s or "").strip().strip("\"'`").lower())
+
+
+def parse_keywords(arg):
+    return [k for k in (norm_kw(p) for p in re.split(r"[,;\n،]", arg or "")) if k]
+
+
+def effective_keywords(cfg, state):
+    """config.json keywords, minus the ones removed from Telegram, plus the ones added from Telegram."""
+    removed = set(state.get("kw_remove", []))
+    out = [k for k in cfg.get("categories", []) if k.lower() not in removed]
+    have = {k.lower() for k in out}
+    for k in state.get("kw_add", []):
+        if k not in have:
+            out.append(k)
+            have.add(k)
+    return out
+
+
+def parse_duration(arg, now):
+    """'6h', '2d' or '6' (hours) -> UTC datetime, capped at 30 days. None if it is not a duration."""
+    m = re.fullmatch(r"(\d{1,3})\s*([hHdD]?)", (arg or "").strip())
+    if not m or int(m.group(1)) == 0:
+        return None
+    hours = int(m.group(1)) * (24 if m.group(2).lower() == "d" else 1)
+    return now + timedelta(hours=min(hours, 30 * 24))
+
+
+def pause_status(state, now):
+    p = state.get("paused_until") or ""
+    if p == "forever":
+        return True
+    if not p:
+        return False
+    try:
+        return now < datetime.fromisoformat(p)
+    except ValueError:
+        return False
+
+
+def awaiting_mode(state, now):
+    """'add' or 'remove' while the bot is waiting for keywords after a bare /add or /remove, else ''."""
+    mode = state.get("awaiting") or ""
+    try:
+        ok = mode in ("add", "remove") and now < datetime.fromisoformat(state.get("await_until") or "")
+    except ValueError:
+        ok = False
+    return mode if ok else ""
+
+
+def start_awaiting(state, mode, now):
+    state["awaiting"], state["await_until"] = mode, (now + timedelta(hours=6)).isoformat()
+    return ("✍️ Now send the keyword(s) as a normal message, for example "
+            "<code>playwright, cypress</code>\nOr send /cancel."), True
+
+
+def clear_awaiting(state):
+    state["awaiting"], state["await_until"] = "", ""
+
+
+def wrap_words(items, width=300):
+    lines, cur = [], ""
+    for it in items:
+        piece = it if not cur else ", " + it
+        if cur and len(cur) + len(piece) > width:
+            lines.append(cur + ",")
+            cur, piece = "", it
+        cur += piece
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def send_long(text, silent=False):
+    """Telegram rejects messages over 4096 characters, so split on line boundaries."""
+    chunk, size = [], 0
+    for line in text.split("\n"):
+        if chunk and size + len(line) + 1 > 3800:
+            tg_send("\n".join(chunk), silent=silent, preview=False)
+            chunk, size = [], 0
+        chunk.append(line)
+        size += len(line) + 1
+    if chunk:
+        tg_send("\n".join(chunk), silent=silent, preview=False)
+
+
+def handle_command(text, state, cfg, now):
+    """Run one command from the owner. Returns (reply_html, state_changed)."""
+    parts = text.strip().split(None, 1)
+    cmd = parts[0].lower().split("@")[0]
+    arg = parts[1].strip() if len(parts) > 1 else ""
+    base = {k.lower() for k in cfg.get("categories", [])}
+    esc = lambda items: html.escape(", ".join(items))
+
+    if cmd == "/cancel":
+        return "👌 Cancelled.", False
+
+    if cmd in ("/start", "/help"):
+        return HELP_TEXT, False
+
+    if cmd == "/list":
+        eff = effective_keywords(cfg, state)
+        lines = [f"📋 <b>Keywords in use ({len(eff)})</b>"] + [html.escape(l) for l in wrap_words(eff)]
+        if state["kw_add"]:
+            lines += ["", "<b>Added by you:</b> " + esc(state["kw_add"])]
+        if state["kw_remove"]:
+            lines += ["", "<b>Removed by you:</b> " + esc(state["kw_remove"])]
+        return "\n".join(lines), False
+
+    if cmd == "/add":
+        if not arg:
+            return start_awaiting(state, "add", now)
+        kws = parse_keywords(arg)
+        if not kws:
+            return "Usage: <code>/add playwright, cypress</code>", False
+        added, restored, already, bad = [], [], [], []
+        for k in kws:
+            if len(k) > MAX_KW_LEN:
+                bad.append(k[:20] + "…")
+            elif k in state["kw_remove"]:
+                state["kw_remove"].remove(k)
+                restored.append(k)
+            elif k in {x.lower() for x in effective_keywords(cfg, state)}:
+                already.append(k)
+            elif len(state["kw_add"]) >= MAX_ADDED:
+                bad.append(k)
+            else:
+                state["kw_add"].append(k)
+                added.append(k)
+        out = []
+        if added:
+            out.append("✅ Added: " + esc(added))
+        if restored:
+            out.append("✅ Switched back on: " + esc(restored))
+        if already:
+            out.append("ℹ️ Already in the list: " + esc(already))
+        if bad:
+            out.append(f"⚠️ Not added (longer than {MAX_KW_LEN} characters or too many added): " + esc(bad))
+        return "\n".join(out), bool(added or restored)
+
+    if cmd == "/remove":
+        if not arg:
+            return start_awaiting(state, "remove", now)
+        kws = parse_keywords(arg)
+        if not kws:
+            return "Usage: <code>/remove jira</code>", False
+        removed, missing = [], []
+        for k in kws:
+            if k in state["kw_add"]:
+                state["kw_add"].remove(k)
+                removed.append(k)
+            elif k in base and k not in state["kw_remove"]:
+                state["kw_remove"].append(k)
+                removed.append(k)
+            else:
+                missing.append(k)
+        out = []
+        if removed:
+            out.append("🗑 Removed: " + esc(removed))
+        if missing:
+            out.append("ℹ️ Not in the list: " + esc(missing))
+        if not effective_keywords(cfg, state):
+            out.append("⚠️ The list is empty now, so nothing will be sent until you /add a keyword.")
+        return "\n".join(out), bool(removed)
+
+    if cmd == "/pause":
+        if not arg:
+            state["paused_until"] = "forever"
+            return "⏸ Alerts paused until you send /resume.", True
+        until = parse_duration(arg, now)
+        if not until:
+            return "Usage: <code>/pause 6h</code> or <code>/pause 2d</code> (or just /pause)", False
+        state["paused_until"] = until.isoformat()
+        return f"⏸ Alerts paused until {until:%Y-%m-%d %H:%M} UTC. Send /resume to turn them on earlier.", True
+
+    if cmd == "/resume":
+        if not state.get("paused_until"):
+            return "▶️ Alerts are already on.", False
+        state["paused_until"] = ""
+        return "▶️ Alerts are on again.", True
+
+    if cmd == "/status":
+        lines = []
+        if pause_status(state, now):
+            until = state["paused_until"]
+            lines.append("⏸ Paused" + ("" if until == "forever" else f" until {until[:16].replace('T', ' ')} UTC"))
+        else:
+            lines.append("▶️ Alerts are on")
+        eff = effective_keywords(cfg, state)
+        lines.append(f"Keywords: {len(eff)} ({len(state['kw_add'])} added, {len(state['kw_remove'])} removed)")
+        for name in cfg.get("sources", list(SOURCES)):
+            h = state["health"].get(name, {})
+            lines.append(f"{'⚠️' if h.get('fails') else '✅'} {html.escape(name)}"
+                         + (f" (failing for {h['fails']} runs)" if h.get("fails") else ""))
+        return "\n".join(lines), False
+
+    return "Unknown command. Send /help to see the list.", False
+
+
+def fetch_updates(offset):
+    """New messages sent to the bot, or None if they could not be read. Never prints the token."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return None
+    url = (f"https://api.telegram.org/bot{token}/getUpdates?"
+           + urllib.parse.urlencode({"offset": offset, "timeout": 0, "allowed_updates": json.dumps(["message"])}))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=25) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        print(f"[telegram] could not read commands: HTTP {e.code}")
+        return None
+    except Exception as e:
+        print(f"[telegram] could not read commands: {type(e).__name__}")
+        return None
+    if not data.get("ok"):
+        print("[telegram] could not read commands: not ok")
+        return None
+    return data.get("result", [])
+
+
+def process_commands(state, cfg, now, notify, updates):
+    """Handle commands from the owner only (messages from anyone else are ignored). Returns True if state changed."""
+    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+    changed, last_id = False, None
+    for u in updates:
+        uid = u.get("update_id")
+        if isinstance(uid, int):
+            last_id = uid if last_id is None else max(last_id, uid)
+        msg = u.get("message") or {}
+        if not owner or str((msg.get("chat") or {}).get("id")) != owner or str((msg.get("from") or {}).get("id")) != owner:
+            continue
+        text = (msg.get("text") or "").strip()
+        if text.startswith("/"):
+            if state.get("awaiting"):       # any new command ends the wait (a bare /add or /remove starts it again)
+                clear_awaiting(state)
+                changed = True
+        else:
+            mode = awaiting_mode(state, now)
+            if not (mode and text):         # a normal message only counts right after a bare /add or /remove
+                continue
+            clear_awaiting(state)
+            changed = True
+            text = f"/{mode} {text}"
+        reply, ch = handle_command(text, state, cfg, now)
+        changed |= ch
+        notify(reply)
+    if last_id is not None:
+        state["tg_offset"] = last_id + 1
+        changed = True
+    return changed
+
+
+# ---------- main ----------
+def main():
+    if "--test" in sys.argv:
+        tg_send("✅ Udemy Deal Alert is connected and working.")
+        print("Test message sent.")
+        return
+
+    if "--summary" in sys.argv:   # send the weekly summary right now (does not reset anything)
+        tg_send(build_summary(load_state(), load_json(CONFIG_FILE, {})), silent=True, preview=False)
+        print("Summary sent.")
+        return
+
+    raw = "--raw" in sys.argv
+    dry = "--dry" in sys.argv or raw
+    cfg = load_json(CONFIG_FILE, {})
+    seen = load_json(SEEN_FILE, [])
+    seen_set = set(seen)
+    tracked = load_json(TRACKED_FILE, [])
+    if not isinstance(tracked, list):
+        tracked = []
+    tracked_keys = {coupon_key(x.get("url", "")) for x in tracked if isinstance(x, dict) and x.get("url")}
+    # Migrate previously seen coupon keys so older alerts also receive periodic validity checks.
+    for old_key in seen:
+        if not isinstance(old_key, str) or "|" not in old_key:
+            continue
+        slug, code = old_key.split("|", 1)
+        old_url = f"https://www.udemy.com/course/{slug}/?couponCode={urllib.parse.quote(code)}"
+        if old_key not in tracked_keys:
+            tracked.append({"title": slug.replace("-", " ").title(), "url": old_url, "source": "previously_seen"})
+            tracked_keys.add(old_key)
+
+    # phase 2: read commands sent to the bot (not in --dry, so a test run never eats them)
+    now = datetime.now(timezone.utc)
+    state = load_state()
+    if not dry:
+        updates = fetch_updates(state["tg_offset"])
+        cmd_changed = process_commands(state, cfg, now, send_long, updates) if updates else False
+        if state["paused_until"] not in ("", "forever") and not pause_status(state, now):
+            state["paused_until"] = ""
+            send_long("▶️ The pause is over. Alerts are on again.")
+            cmd_changed = True
+        if cmd_changed:
+            save_state(state)   # saved right away so a later crash cannot replay the same commands
+    cfg["categories"] = effective_keywords(cfg, state)
+
+    names = cfg.get("sources", list(SOURCES))
+    all_deals, errors, results = [], [], {}
+    for name in names:
+        fn = SOURCES.get(name)
+        if not fn:
+            print(f"[{name}] unknown source, skipped")
+            continue
+        try:
+            got = fn(cfg)
+            results[name] = (len(got), "")
+            print(f"[{name}] fetched {len(got)} items")
+            if raw:
+                for d in got:
+                    print("   *", d["title"][:70], "|", d["categories"], "|", d["url"] or d["ref"])
+            all_deals.extend(got)
+        except Exception as e:  # keep going if one source is down
+            results[name] = (0, str(e))
+            print(f"[{name}] ERROR: {e}")
+            errors.append(name)
+
+    # Recheck a bounded rotating batch of previously discovered coupons on every run.
+    # This prevents expired offers from remaining trusted forever without flooding Udemy.
+    max_checks = max(1, int(cfg.get("max_verifies_per_run", 25)))
+    check_batch, remainder = tracked[:max_checks], tracked[max_checks:]
+    still_tracked = []
+    for old in check_batch:
+        if not isinstance(old, dict) or not old.get("url"):
+            continue
+        verdict = verify_udemy_coupon(old["url"])
+        print(f"[recheck] {old.get('title', 'Previously seen course')[:55]}: {verdict}")
+        if verdict != "NOT_FREE":
+            still_tracked.append(old)
+    tracked = remainder + still_tracked
+
+    # new, unique, passing the basic rules. Lazy items are resolved only when their title matches.
+    new, batch_keys, newly_seen = [], set(), set()
+    resolves, fails = 0, {}
+    max_res = cfg.get("max_resolves_per_run", 25)
+    for d in all_deals:
+        ref = deal_ref(d)
+        if ref in seen_set or ref in batch_keys:
+            continue
+        batch_keys.add(ref)
+        if d["url"]:                      # direct source
+            if not is_free(d, cfg):
+                newly_seen.add(ref)
+                continue
+            verdict = verify_udemy_coupon(d["url"])
+            print(f"[verify] {d['title'][:55]}: {verdict}")
+            if verdict == "ACTIVE_FREE":
+                new.append(d)
+                newly_seen.add(ref)
+                if ref not in tracked_keys:
+                    tracked.append({"title": d["title"], "url": d["url"], "source": d["source"]})
+                    tracked_keys.add(ref)
+            elif verdict == "NOT_FREE":
+                newly_seen.add(ref)       # confirmed expired/paid; do not retry this coupon
+            # UNVERIFIED is deliberately not marked seen; it can be retried next run.
+            continue
+        # lazy source
+        if not (is_free(d, cfg) and is_interest(d, cfg)):
+            newly_seen.add(ref)
+            continue
+        if not listing_says_free(d):
+            print(f"[{d['source']}] skipped (not 100% off): {d['title'][:60]}")
+            newly_seen.add(ref)
+            continue
+        if resolves >= max_res or fails.get(d["source"], 0) >= 3:
+            newly_seen.discard(ref)       # try again on the next run
+            continue
+        resolves += 1
+        try:
+            url = d["resolve"]()
+        except Exception as e:
+            fails[d["source"]] = fails.get(d["source"], 0) + 1
+            print(f"[{d['source']}] could not resolve '{d['title'][:50]}': {e}")
+            newly_seen.discard(ref)
+            continue
+        time.sleep(0.3)
+        if not url:
+            newly_seen.add(ref)
+            continue
+        key = coupon_key(url)
+        if key in seen_set or key in batch_keys:
+            newly_seen.add(ref)
+            continue
+        batch_keys.add(key)
+        d["url"] = url
+        if not is_free(d, cfg):
+            newly_seen.add(ref)
+            continue
+        verdict = verify_udemy_coupon(url)
+        print(f"[verify] {d['title'][:55]}: {verdict}")
+        if verdict == "ACTIVE_FREE":
+            new.append(d)
+            newly_seen.update((ref, key))
+            if key not in tracked_keys:
+                tracked.append({"title": d["title"], "url": url, "source": d["source"]})
+                tracked_keys.add(key)
+        elif verdict == "NOT_FREE":
+            newly_seen.update((ref, key))
+        # UNVERIFIED candidates remain eligible for retry on the next scheduled run.
+
+    loud = [d for d in new if is_interest(d, cfg)]
+    others = [d for d in new if not is_interest(d, cfg)]
+    max_loud = cfg.get("max_messages_per_run", 10)
+    overflow = loud[max_loud:]
+    loud = loud[:max_loud]
+
+    digest = []
+    if cfg.get("notify_all_free", True):
+        digest = [d for d in overflow + others if in_digest_categories(d, cfg)]
+    max_digest = cfg.get("max_digest_per_run", 40)
+    dropped = max(0, len(digest) - max_digest)
+    digest = digest[:max_digest]
+    print(f"{len(new)} new free coupons -> {len(loud)} interest alerts + {len(digest)} in digest "
+          f"(of {len(all_deals)} items fetched, {resolves} links resolved)")
+
+    paused = pause_status(state, now)
+    if paused:
+        print("PAUSED from Telegram: nothing will be sent (new coupons are still marked as seen)")
+
+    if dry:
+        for d in loud:
+            print("INTEREST:", d["title"], "|", d["source"], "|", d["url"])
+        for d in digest:
+            print("digest  :", d["title"], "|", d["source"], "|", d["url"])
+        return
+
+    if paused:
+        loud, digest = [], []
+    for d in loud:
+        tg_send(format_deal(d))
+        state["sent"].append({"t": d["title"][:80], "s": d["source"]})
+    state["sent"] = state["sent"][-200:]
+
+    chunk = cfg.get("digest_chunk", 10)
+    for i in range(0, len(digest), chunk):
+        part = digest[i:i + chunk]
+        last = i + chunk >= len(digest)
+        tg_send(format_digest(part, i, len(digest), dropped if last else 0), silent=True, preview=False)
+
+    # source health + weekly summary (state.json is written only when something changed)
+    state_changed = bool(loud)
+    state_changed |= update_health(state, results, cfg, lambda m: tg_send(m, preview=False))
+    state_changed |= maybe_weekly_summary(state, cfg, lambda m: tg_send(m, silent=True, preview=False))
+    if state_changed:
+        STATE_FILE.write_text(json.dumps(state, indent=1, ensure_ascii=False), encoding="utf-8")
+
+    # remember everything we looked at so nothing is repeated later
+    seen = list(dict.fromkeys(seen + sorted(newly_seen)))[-8000:]
+    SEEN_FILE.write_text(json.dumps(seen, indent=0), encoding="utf-8")
+    TRACKED_FILE.write_text(json.dumps(tracked[-8000:], indent=1, ensure_ascii=False), encoding="utf-8")
+
+    if names and len(errors) == len(names):
+        raise SystemExit("All sources failed.")
+
+
+if __name__ == "__main__":
+    main()

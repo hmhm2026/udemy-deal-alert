@@ -26,81 +26,8 @@
    "last_error": ""
   }
  },
- "sent": [
-  {
-   "t": "QA Automation Testing: Selenium, Cypress & API Exams",
-   "s": "real.discount"
-  },
-  {
-   "t": "AI-Powered Software Testing for Beginners - ZERO Code",
-   "s": "real.discount"
-  },
-  {
-   "t": "Agentic AI Red Teaming: Hands-On Security Testing",
-   "s": "real.discount"
-  },
-  {
-   "t": "Master Penetration Testing and Ethical Hacking: From A to Z",
-   "s": "real.discount"
-  },
-  {
-   "t": "1500 Questions | ISTQB CTFL Certification 2026",
-   "s": "real.discount"
-  },
-  {
-   "t": "1500 Questions ISTQB Certified Tester Foundation Level CTFL",
-   "s": "real.discount"
-  },
-  {
-   "t": "1500 Questions | ISTQB Test Manager (CTAL-TM) Certification",
-   "s": "real.discount"
-  },
-  {
-   "t": "What every java developer must know about software testing",
-   "s": "real.discount"
-  },
-  {
-   "t": "KI-nativer SDLC mit Claude Code: planen, bauen, prüfen",
-   "s": "real.discount"
-  },
-  {
-   "t": "Selenium with C# .NET for Beginners ( .NET 8, C# 12)",
-   "s": "real.discount"
-  },
-  {
-   "t": "Specflow BDD: C# Testing Mastery",
-   "s": "real.discount"
-  },
-  {
-   "t": "Webservices API Testing with Postman - Complete Guide",
-   "s": "real.discount"
-  },
-  {
-   "t": "C# Test Automation Engineer - from Zero to Hero",
-   "s": "real.discount"
-  },
-  {
-   "t": "Java Test Automation Engineer - from Zero to Hero",
-   "s": "real.discount"
-  },
-  {
-   "t": "Selenium in C# - Setup Simple Test Automation Framework",
-   "s": "real.discount"
-  },
-  {
-   "t": "TDD, CI/CD, Pair Programming & Other XP Practices for Devs",
-   "s": "real.discount"
-  },
-  {
-   "t": "JUnit 5, Mockito, PowerMock, TDD, BDD & ATTD",
-   "s": "real.discount"
-  },
-  {
-   "t": "Defect Management & QA Reporting: Metrics & KPIs",
-   "s": "real.discount"
-  }
- ],
- "last_summary": "2026-11-09",
+ "sent": [],
+ "last_summary": "2026-11-16",
  "kw_add": [],
  "kw_remove": [],
  "paused_until": "",

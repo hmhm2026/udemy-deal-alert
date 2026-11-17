@@ -26,7 +26,16 @@
    "last_error": ""
   }
  },
- "sent": [],
+ "sent": [
+  {
+   "t": "AI Browser Agents with Python & Playwright",
+   "s": "real.discount"
+  },
+  {
+   "t": "Ethical Hacking & Penetration Testing with AI",
+   "s": "real.discount"
+  }
+ ],
  "last_summary": "2026-11-16",
  "kw_add": [],
  "kw_remove": [],

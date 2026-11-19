@@ -262,7 +262,7 @@ def assess(d, cfg, now):
         if meta.get("sale_price") not in (None, 0.0):
             return "SKIP", ""
         if age <= fresh:
-            return "SEND", f"ℹ️ Listed {int(age)} min ago (Udemy check unavailable)"
+            return "SEND", "ℹ️ Udemy check unavailable; the listing is recent"
         return "SKIP", ""
     return "WAIT", ""
 
@@ -716,32 +716,62 @@ def in_digest_categories(d, cfg):
 
 
 # ---------- telegram ----------
-def tg_send(text, silent=False, preview=True):
+def tg_send(text, silent=False, preview=True, button=None):
+    """Send a Telegram message. button=(label, url) adds one inline button under it."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
         raise SystemExit("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variable.")
-    body = urllib.parse.urlencode({
+    fields = {
         "chat_id": chat, "text": text, "parse_mode": "HTML",
         "disable_web_page_preview": "false" if preview else "true",
         "disable_notification": "true" if silent else "false",
-    }).encode()
-    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=body)
-    try:
-        with urllib.request.urlopen(req, timeout=25) as r:
-            r.read()
-    except urllib.error.HTTPError as e:
-        raise SystemExit(f"Telegram error HTTP {e.code} (check token / chat id)") from None
+    }
+    if button:
+        fields["reply_markup"] = json.dumps({"inline_keyboard": [[{"text": button[0], "url": button[1]}]]})
+    for attempt in (1, 2):
+        req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage",
+                                     data=urllib.parse.urlencode(fields).encode())
+        try:
+            with urllib.request.urlopen(req, timeout=25) as r:
+                r.read()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 400 and "reply_markup" in fields and attempt == 1:
+                del fields["reply_markup"]      # Telegram refused the button: send the message without it
+                print("[telegram] button refused, sending without it")
+                continue
+            raise SystemExit(f"Telegram error HTTP {e.code} (check token / chat id)") from None
     time.sleep(0.5)  # stay well under Telegram rate limits
 
 
-def format_deal(d):
+def age_text(t, now):
+    """'5 min ago', '3 h ago', '2 days ago' for a UTC datetime, or '' if unknown."""
+    if not t:
+        return ""
+    mins = max(0, int((now - t).total_seconds() // 60))
+    if mins < 1:
+        return "just now"
+    if mins < 60:
+        return f"{mins} min ago"
+    if mins < 48 * 60:
+        return f"{mins // 60} h ago"
+    return f"{mins // 1440} days ago"
+
+
+def format_deal(d, now=None):
+    now = now or datetime.now(timezone.utc)
     cat = ", ".join(c for c in d["categories"] if c)[:80]
     lines = [f"🎓 <b>{html.escape(d['title'])}</b>", "💸 FREE (100% off)"]
     if cat:
         lines.append(f"🏷 {html.escape(cat)}")
     if d["rating"]:
         lines.append(f"⭐ {d['rating']:.1f}")
+    meta = d.get("meta") or {}
+    when = age_text(meta.get("listed_at"), now)
+    if when:
+        lines.append(f"🕒 Listed {when}")
+    lines.append("⚡ Free coupons run out fast - open it now")
     lines.append(f"🔗 {html.escape(d['url'])}")
     if d.get("note"):
         lines.append(html.escape(d["note"]))
@@ -1377,7 +1407,7 @@ def main():
     if paused:
         loud, digest = [], []
     for d in loud:
-        tg_send(format_deal(d))
+        tg_send(format_deal(d, now), button=("Open course", d["url"]))
         state["sent"].append({"t": d["title"][:80], "s": d["source"]})
     state["sent"] = state["sent"][-200:]
 

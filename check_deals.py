@@ -237,6 +237,47 @@ def verify_udemy_coupon(url, course_id=None):
     return "UNVERIFIED"
 
 
+MIN_REVIEWS_FOR_RATING = 20     # a rating counts only when at least this many people gave it
+MIN_AGE_DAYS_FOR_STUDENTS = 30  # a low student count counts only for courses older than this
+
+
+def quality_limits(cfg, state):
+    r = state.get("min_rating")
+    st = state.get("min_students")
+    return (float(cfg.get("min_rating", 0) or 0) if r is None else float(r),
+            int(cfg.get("min_students", 0) or 0) if st is None else int(st))
+
+
+def quality_ok(d, limits, now):
+    """Drop a course only when it is PROVEN weak. Unknown or brand-new data always passes."""
+    min_rating, min_students = limits
+    meta = d.get("meta") or {}
+    rating, reviews = d.get("rating"), meta.get("reviews")
+    if min_rating and rating and reviews is not None and reviews >= MIN_REVIEWS_FOR_RATING and rating < min_rating:
+        return False, f"rating {rating:.1f} from {int(reviews)} reviews is under {min_rating:g}"
+    students, created = meta.get("students"), meta.get("created_at")
+    if (min_students and students and created and students < min_students
+            and (now - created).days >= MIN_AGE_DAYS_FOR_STUDENTS):
+        return False, f"{int(students)} students on a course older than {MIN_AGE_DAYS_FOR_STUDENTS} days (min {min_students})"
+    return True, ""
+
+
+def quality_lines(d):
+    """Lines that let you judge a course yourself: rating, students, instructor, or 'new'."""
+    meta = d.get("meta") or {}
+    reviews, students = meta.get("reviews"), meta.get("students")
+    out = []
+    if d.get("rating") and reviews:
+        out.append(f"⭐ {d['rating']:.1f} ({int(reviews):,} reviews)" + (f" · 👥 {int(students):,} students" if students else ""))
+    elif reviews is not None or students is not None or meta.get("created_at"):
+        out.append("🆕 New course - no ratings yet" + (f" · 👥 {int(students):,} students" if students else ""))
+    elif d.get("rating"):
+        out.append(f"⭐ {d['rating']:.1f}")
+    if meta.get("instructor"):
+        out.append(f"👤 {meta['instructor']}")
+    return out
+
+
 def assess(d, cfg, now):
     """Decide whether a coupon may be sent. Returns (verdict, note): verdict is SEND, SKIP (dead, remember it)
     or WAIT (cannot confirm now; try again next run). Udemy's own answer wins; otherwise the feed's own
@@ -458,6 +499,22 @@ def source_realdiscount(cfg):
     return out
 
 
+def _instructor_name(v):
+    """Instructor label from courson's 'instructors' field (a list of {name: profile_url}), or ''."""
+    try:
+        if isinstance(v, str):
+            v = ast_literal(v)
+        names = [k for item in v for k in (item.keys() if isinstance(item, dict) else [str(item)])]
+        return ", ".join(names)[:70]
+    except Exception:
+        return ""
+
+
+def ast_literal(text):
+    import ast
+    return ast.literal_eval(text)
+
+
 def source_courson(cfg):
     """courson.xyz JSON endpoint used by its 'load more' button (30 per page)."""
     out = []
@@ -488,7 +545,10 @@ def source_courson(cfg):
                       headline + " " + (c.get("description") or ""), to_float(c.get("rating")))
             dd["meta"] = {"course_id": c.get("id"), "uses_left": to_float(c.get("coupon_uses_remaining")),
                           "max_uses": to_float(c.get("coupon_max_uses")),
-                          "refreshed_at": parse_time(c.get("last_udemy_refresh"))}
+                          "refreshed_at": parse_time(c.get("last_udemy_refresh")),
+                          "reviews": to_float(c.get("num_reviews")), "students": to_float(c.get("num_subscribers")),
+                          "created_at": parse_time(c.get("created_date")),
+                          "instructor": _instructor_name(c.get("instructors"))}
             out.append(dd)
     return out
 
@@ -691,9 +751,6 @@ def is_free(d, cfg):
     disc = d["discount"]
     if disc is None or disc < cfg.get("min_discount", 100):
         return False
-    min_rating = cfg.get("min_rating", 0)
-    if min_rating and d["rating"] is not None and d["rating"] < min_rating:
-        return False
     hay = haystack(d, cfg)
     if any(bad.lower() in hay for bad in cfg.get("exclude_keywords", [])):
         return False
@@ -766,8 +823,7 @@ def format_deal(d, now=None):
     lines = [f"🎓 <b>{html.escape(d['title'])}</b>", "💸 FREE (100% off)"]
     if cat:
         lines.append(f"🏷 {html.escape(cat)}")
-    if d["rating"]:
-        lines.append(f"⭐ {d['rating']:.1f}")
+    lines.extend(html.escape(x) for x in quality_lines(d))
     meta = d.get("meta") or {}
     when = age_text(meta.get("listed_at"), now)
     if when:
@@ -805,6 +861,8 @@ def load_state():
     s.setdefault("paused_until", "")    # phase 2: "" | "forever" | ISO time in UTC
     s.setdefault("tg_offset", 0)        # phase 2: next Telegram update id to read
     s.setdefault("awaiting", "")        # phase 2: "add" | "remove" after a bare /add or /remove
+    s.setdefault("min_rating", None)    # phase 6: None = use config.json, 0 = off
+    s.setdefault("min_students", None)  # phase 6: None = use config.json, 0 = off
     s.setdefault("await_until", "")     # phase 2: ISO time (UTC) when that wait expires
     return s
 
@@ -884,7 +942,9 @@ HELP_TEXT = (
     "(or send just /add or /remove, then send the keywords as your next message)\n"
     "/pause 6h - mute alerts for 6 hours (also 2d; plain /pause = until /resume)\n"
     "/resume - turn alerts back on\n"
-    "/status - pause state and source health\n\n"
+    "/minrating 3.5 - skip courses with a proven low rating (0 = off)\n"
+    "/minstudents 100 - skip old courses with few students (0 = off)\n"
+    "/status - pause state, filters and source health\n\n"
     "Commands are read every few minutes, so the reply is not instant."
 )
 
@@ -1065,6 +1125,29 @@ def handle_command(text, state, cfg, now):
         state["paused_until"] = until.isoformat()
         return f"⏸ Alerts paused until {until:%Y-%m-%d %H:%M} UTC. Send /resume to turn them on earlier.", True
 
+    if cmd in ("/minrating", "/minstudents"):
+        name = cmd[1:].replace("min", "min_")
+        if not arg:
+            cur = quality_limits(cfg, state)[0 if cmd == "/minrating" else 1]
+            return f"Current {cmd[1:]}: {cur:g} (0 = off). Example: <code>{cmd} {'3.5' if cmd == '/minrating' else '100'}</code>", False
+        try:
+            val = float(arg.replace(",", "."))
+        except ValueError:
+            return f"Usage: <code>{cmd} {'3.5' if cmd == '/minrating' else '100'}</code> (0 turns it off)", False
+        if cmd == "/minrating":
+            if not 0 <= val <= 5:
+                return "The rating must be between 0 and 5.", False
+            state["min_rating"] = val
+            note = (f"Courses with a rating under {val:g} are skipped, but only when at least "
+                    f"{MIN_REVIEWS_FOR_RATING} people rated them. New courses without ratings are always sent.") if val else ""
+        else:
+            if val < 0 or val > 1000000:
+                return "Send a whole number like 100 (0 turns it off).", False
+            state["min_students"] = int(val)
+            note = (f"Courses with fewer than {int(val)} students are skipped, but only when they are older than "
+                    f"{MIN_AGE_DAYS_FOR_STUDENTS} days. New courses are always sent.") if val else ""
+        return (f"✅ {cmd[1:]} set to {val:g}. " + note) if val else f"✅ {cmd[1:]} is off.", True
+
     if cmd == "/resume":
         if not state.get("paused_until"):
             return "▶️ Alerts are already on.", False
@@ -1080,6 +1163,8 @@ def handle_command(text, state, cfg, now):
             lines.append("▶️ Alerts are on")
         eff = effective_keywords(cfg, state)
         lines.append(f"Keywords: {len(eff)} ({len(state['kw_add'])} added, {len(state['kw_remove'])} removed)")
+        mr, ms = quality_limits(cfg, state)
+        lines.append(f"Filters: min rating {mr:g}, min students {ms} (0 = off)")
         for name in cfg.get("sources", list(SOURCES)):
             h = state["health"].get(name, {})
             lines.append(f"{'⚠️' if h.get('fails') else '✅'} {html.escape(name)}"
@@ -1303,6 +1388,7 @@ def main():
     # new, unique, passing the basic rules. Lazy items are resolved only when their title matches.
     new, batch_keys, newly_seen = [], set(), set()
     resolves, fails, verifies = 0, {}, 0
+    qlimits = quality_limits(cfg, state)
     max_ver = cfg.get("max_verifies_per_run", 25)
     max_res = cfg.get("max_resolves_per_run", 25)
     for d in all_deals:
@@ -1312,6 +1398,11 @@ def main():
         batch_keys.add(ref)
         if d["url"]:                      # direct source
             if not (is_free(d, cfg) and is_interest(d, cfg)):
+                newly_seen.add(ref)
+                continue
+            ok, why = quality_ok(d, qlimits, now)
+            if not ok:
+                print(f"[quality] skipped '{d['title'][:50]}': {why}")
                 newly_seen.add(ref)
                 continue
             if verifies >= max_ver:

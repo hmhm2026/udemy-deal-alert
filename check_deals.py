@@ -123,11 +123,61 @@ def _positive_price_in_json(value):
     return False
 
 
-def verify_udemy_coupon(url):
-    """Conservatively verify the coupon landing page. Returns ACTIVE_FREE, NOT_FREE, or UNVERIFIED."""
+_PAGE_BLOCKED = False      # set when Udemy refuses the course page (HTTP 403), so we stop asking this run
+_API_DEAD = False          # set when the price API fails with a network/HTTP error
+
+
+def _udemy_json(url):
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode("utf-8", errors="replace"))
+
+
+def udemy_price_check(url, course_id=None):
+    """Ask Udemy's public price API. Returns ACTIVE_FREE, NOT_FREE or None (could not tell)."""
+    global _API_DEAD
+    if _API_DEAD:
+        return None
+    parsed = urllib.parse.urlparse(url)
+    code = urllib.parse.parse_qs(parsed.query).get("couponCode", [""])[0]
+    slug = parsed.path.strip("/").split("/")[-1]
+    try:
+        if not course_id:
+            info = _udemy_json(f"https://www.udemy.com/api-2.0/courses/{urllib.parse.quote(slug)}/?fields[course]=id")
+            course_id = info.get("id")
+        if not course_id:
+            return None
+        q = urllib.parse.urlencode({"course_ids": course_id, "fields[pricing_result]": "price,discount_price",
+                                    "couponCode": code})
+        data = _udemy_json(f"https://www.udemy.com/api-2.0/pricing/?{q}")
+        res = (data.get("courses") or {}).get(str(course_id)) or {}
+        disc = res.get("discount_price")
+        if isinstance(disc, dict) and disc.get("amount") is not None:
+            return "ACTIVE_FREE" if float(disc["amount"]) == 0 else "NOT_FREE"
+        price = res.get("price")
+        if isinstance(price, dict) and price.get("amount") is not None and float(price["amount"]) > 0:
+            return "NOT_FREE"             # price shown, no coupon discount applied: coupon is dead
+        return None
+    except urllib.error.HTTPError as exc:
+        print(f"[verify] price API refused: HTTP {exc.code}")
+        _API_DEAD = exc.code in (401, 403, 429)
+        return None
+    except Exception as exc:
+        print(f"[verify] price API error: {type(exc).__name__}")
+        return None
+
+
+def verify_udemy_coupon(url, course_id=None):
+    """Verify a coupon with Udemy. Returns ACTIVE_FREE, NOT_FREE, or UNVERIFIED."""
+    global _PAGE_BLOCKED
     parsed = urllib.parse.urlparse(url)
     query = urllib.parse.parse_qs(parsed.query)
     if parsed.hostname not in {"udemy.com", "www.udemy.com"} or not query.get("couponCode"):
+        return "UNVERIFIED"
+    api = udemy_price_check(url, course_id)
+    if api:
+        return api
+    if _PAGE_BLOCKED:
         return "UNVERIFIED"
     try:
         req = urllib.request.Request(url, headers={
@@ -145,8 +195,8 @@ def verify_udemy_coupon(url):
         # Keep the coupon URL private (it contains a redeemable coupon code),
         # but expose the HTTP status so blocked/rate-limited requests are diagnosable.
         host = urllib.parse.urlparse(url).netloc or "unknown host"
-        print(f"[verify] Udemy request rejected: HTTP {exc.code} "
-              f"{exc.reason} ({host})")
+        print(f"[verify] Udemy page refused: HTTP {exc.code} (not asking again this run)")
+        _PAGE_BLOCKED = _PAGE_BLOCKED or exc.code in (401, 403, 429)
         return "UNVERIFIED"
     except urllib.error.URLError as exc:
         host = urllib.parse.urlparse(url).netloc or "unknown host"
@@ -184,6 +234,37 @@ def verify_udemy_coupon(url):
     if positive_price or re.search(r'["\'](?:discount_price|discountPrice)["\']\s*:\s*\{[^{}]{0,300}["\']amount["\']\s*:\s*(?!0(?:\.0+)?(?:[,}]))\d+(?:\.\d+)?', lowered):
         return "NOT_FREE"
     return "UNVERIFIED"
+
+
+def assess(d, cfg, now):
+    """Decide whether a coupon may be sent. Returns (verdict, note): verdict is SEND, SKIP (dead, remember it)
+    or WAIT (cannot confirm now; try again next run). Udemy's own answer wins; otherwise the feed's own
+    freshness data is used; otherwise nothing is sent."""
+    meta = d.get("meta") or {}
+    v = verify_udemy_coupon(d["url"], meta.get("course_id"))
+    if v == "ACTIVE_FREE":
+        return "SEND", "✅ Verified free on Udemy"
+    if v == "NOT_FREE":
+        return "SKIP", ""
+    if cfg.get("send_unverified", False):
+        return "SEND", "⚠️ Not verified - may have expired"
+    fresh = cfg.get("fresh_minutes", 120)
+    if meta.get("uses_left") is not None:                      # courson: Udemy data refreshed by the site
+        ref_t = meta.get("refreshed_at")
+        age = (now - ref_t).total_seconds() / 60 if ref_t else None
+        if d["discount"] < 100 or meta["uses_left"] <= 0:
+            return "SKIP", ""
+        if age is not None and age <= max(fresh, 180):
+            return "SEND", f"ℹ️ Feed shows {int(meta['uses_left'])} of {int(meta['max_uses'] or 0)} uses left"
+        return "SKIP", ""
+    if meta.get("listed_at"):                                   # real.discount: only the listing time is known
+        age = (now - meta["listed_at"]).total_seconds() / 60
+        if meta.get("sale_price") not in (None, 0.0):
+            return "SKIP", ""
+        if age <= fresh:
+            return "SEND", f"ℹ️ Listed {int(age)} min ago (Udemy check unavailable)"
+        return "SKIP", ""
+    return "WAIT", ""
 
 
 def get_json(url, headers=None, data=None):
@@ -229,6 +310,18 @@ def strip_tags(s):
     return re.sub(r"<[^>]+>", " ", html.unescape(s or "")).strip()
 
 
+def parse_time(v):
+    """'2026-11-19 09:43:07' or 'Thu, 19 Nov 2026 09:41:22 GMT' (both UTC) -> aware datetime, or None."""
+    if not v or not isinstance(v, str):
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%a, %d %b %Y %H:%M:%S GMT", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(v.strip(), fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return None
+
+
 def to_float(v):
     try:
         return float(v) if v is not None else None
@@ -240,7 +333,7 @@ def deal(title, url, source, discount=100, categories=None, text="", rating=None
     return {"title": html.unescape(title or "").strip(), "url": url, "discount": discount,
             "categories": [c for c in (categories or []) if c], "text": (text or "")[:500],
             "rating": rating, "source": source, "ref": ref, "resolve": resolve,
-            "evidence": "", "trust_free": True}
+            "evidence": "", "trust_free": True, "meta": {}, "note": ""}
 
 
 def lazy_deal(title, ref, source, resolve, evidence="", trust_free=True):
@@ -349,10 +442,12 @@ def source_realdiscount(cfg):
             if not link:
                 continue
             cat = it.get("category") or it.get("subcategory") or ""
-            out.append(deal(it.get("name") or it.get("title"), link, "real.discount", 100,
-                            [cat] if isinstance(cat, str) else list(cat),
-                            strip_tags(it.get("shoer_description") or it.get("description") or ""),
-                            to_float(it.get("rating"))))
+            dd = deal(it.get("name") or it.get("title"), link, "real.discount", 100,
+                      [cat] if isinstance(cat, str) else list(cat),
+                      strip_tags(it.get("shoer_description") or it.get("description") or ""),
+                      to_float(it.get("rating")))
+            dd["meta"] = {"listed_at": parse_time(it.get("sale_start")), "sale_price": to_float(it.get("sale_price"))}
+            out.append(dd)
     return out
 
 
@@ -380,9 +475,14 @@ def source_courson(cfg):
             cats = [c.get("category"), c.get("subcategory"), c.get("topic")]
             headline = c.get("headline") or ""
             title = headline if 0 < len(headline) <= 100 else slug.replace("-", " ").title()
-            out.append(deal(title, f"https://www.udemy.com/course/{slug}/?couponCode={code}",
-                            "courson", 100, [x for x in cats if isinstance(x, str)],
-                            headline + " " + (c.get("description") or ""), to_float(c.get("rating"))))
+            pct = to_float(c.get("coupon_discount_percent"))
+            dd = deal(title, f"https://www.udemy.com/course/{slug}/?couponCode={code}",
+                      "courson", pct if pct is not None else 100, [x for x in cats if isinstance(x, str)],
+                      headline + " " + (c.get("description") or ""), to_float(c.get("rating")))
+            dd["meta"] = {"course_id": c.get("id"), "uses_left": to_float(c.get("coupon_uses_remaining")),
+                          "max_uses": to_float(c.get("coupon_max_uses")),
+                          "refreshed_at": parse_time(c.get("last_udemy_refresh"))}
+            out.append(dd)
     return out
 
 
@@ -544,8 +644,8 @@ def format_deal(d):
     if d["rating"]:
         lines.append(f"⭐ {d['rating']:.1f}")
     lines.append(f"🔗 {html.escape(d['url'])}")
-    if d.get("unverified"):
-        lines.append("⚠️ Not verified (Udemy blocked the check) - may have expired")
+    if d.get("note"):
+        lines.append(html.escape(d["note"]))
     lines.append(f"<i>via {d['source']}</i>")
     return "\n".join(lines)
 
@@ -913,8 +1013,59 @@ def process_commands(state, cfg, now, notify, updates):
     return changed
 
 
+def diagnose_fields():
+    """--fields: show what the feeds really contain (expiry? uses left?) and test ways to check Udemy."""
+    def show(name, item):
+        print(f"\n=== {name}: fields ===")
+        for k, v in item.items():
+            print(f"  {k}: {str(v)[:110]!r}")
+    try:
+        data = get_json("https://cdn.real.discount/api/courses?page=1&limit=3&sortBy=sale_start&store=Udemy&freeOnly=true",
+                        headers={"Referer": "https://www.real.discount/", "Origin": "https://www.real.discount"})
+        items = data.get("items") or data.get("results") or data.get("data") or []
+        print("real.discount top-level keys:", list(data.keys()))
+        for it in items[:2]:
+            show("real.discount", it)
+    except Exception as e:
+        print("real.discount ERROR:", e)
+    link = ""
+    try:
+        data = get_json("https://courson.xyz/load-more-coupons",
+                        headers={"Content-Type": "application/json", "Referer": "https://courson.xyz/coupons",
+                                 "Origin": "https://courson.xyz"},
+                        data=json.dumps({"filters": {}, "offset": 0}).encode())
+        for c in (data.get("coupons") or [])[:2]:
+            show("courson", c)
+        c0 = (data.get("coupons") or [{}])[0]
+        if c0.get("id_name") and c0.get("coupon_code"):
+            link = f"https://www.udemy.com/course/{c0['id_name']}/?couponCode={c0['coupon_code']}"
+    except Exception as e:
+        print("courson ERROR:", e)
+    if link:
+        print("\n=== Udemy check attempts (status only) ===")
+        slug = urllib.parse.urlparse(link).path.strip("/").split("/")[-1]
+        tests = {
+            "course page": link,
+            "api-2.0 course": f"https://www.udemy.com/api-2.0/courses/{slug}/?fields[course]=id,price,is_paid",
+        }
+        for label, u in tests.items():
+            try:
+                req = urllib.request.Request(u, headers={"User-Agent": UA, "Accept": "application/json, text/html"})
+                with urllib.request.urlopen(req, timeout=25) as r:
+                    print(f"  {label}: HTTP {r.status}, {len(r.read())} bytes")
+            except urllib.error.HTTPError as e:
+                print(f"  {label}: HTTP {e.code}")
+            except Exception as e:
+                print(f"  {label}: {type(e).__name__}")
+        print("  price API verdict (ACTIVE_FREE / NOT_FREE / None):", udemy_price_check(link, c0.get("id")))
+
+
 # ---------- main ----------
 def main():
+    if "--fields" in sys.argv:
+        diagnose_fields()
+        return
+
     if "--test" in sys.argv:
         tg_send("✅ Udemy Deal Alert is connected and working.")
         print("Test message sent.")
@@ -997,15 +1148,18 @@ def main():
             if not (is_free(d, cfg) and is_interest(d, cfg)):
                 newly_seen.add(ref)
                 continue
-            verdict = verify_udemy_coupon(d["url"]) if verifies < max_ver else "UNVERIFIED"
+            if verifies >= max_ver:
+                continue                  # over the per-run limit: look again next run
             verifies += 1
-            print(f"[verify] {d['title'][:55]}: {verdict}")
-            if verdict == "NOT_FREE":
-                newly_seen.add(ref)       # confirmed expired/paid; do not retry this coupon
+            verdict, note = assess(d, cfg, now)
+            print(f"[verify] {d['title'][:55]}: {verdict} {note}")
+            if verdict == "WAIT":
                 continue
-            d["unverified"] = verdict != "ACTIVE_FREE"   # Udemy often blocks the check (HTTP 403): still send it
-            new.append(d)
             newly_seen.add(ref)
+            if verdict == "SKIP":
+                continue
+            d["note"] = note
+            new.append(d)
             if ref not in tracked_keys:
                 tracked.append({"title": d["title"], "url": d["url"], "source": d["source"]})
                 tracked_keys.add(ref)
@@ -1042,13 +1196,18 @@ def main():
         if not is_free(d, cfg):
             newly_seen.add(ref)
             continue
-        verdict = verify_udemy_coupon(url) if verifies < max_ver else "UNVERIFIED"
-        verifies += 1
-        print(f"[verify] {d['title'][:55]}: {verdict}")
-        newly_seen.update((ref, key))
-        if verdict == "NOT_FREE":
+        if verifies >= max_ver:
+            newly_seen.discard(ref)
             continue
-        d["unverified"] = verdict != "ACTIVE_FREE"
+        verifies += 1
+        verdict, note = assess(d, cfg, now)
+        print(f"[verify] {d['title'][:55]}: {verdict} {note}")
+        if verdict == "WAIT":
+            continue                      # cannot confirm now: try again next run
+        newly_seen.update((ref, key))
+        if verdict == "SKIP":
+            continue
+        d["note"] = note
         new.append(d)
         if key not in tracked_keys:
             tracked.append({"title": d["title"], "url": url, "source": d["source"]})

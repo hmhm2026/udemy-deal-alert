@@ -148,14 +148,18 @@ def udemy_price_check(url, course_id=None):
             course_id = info.get("id")
         if not course_id:
             return None
-        q = urllib.parse.urlencode({"course_ids": course_id, "fields[pricing_result]": "price,discount_price",
-                                    "couponCode": code})
+        params = {"course_ids": course_id, "fields[pricing_result]": "price,discount_price"}
+        if code:
+            params["couponCode"] = code
+        q = urllib.parse.urlencode(params)
         data = _udemy_json(f"https://www.udemy.com/api-2.0/pricing/?{q}")
         res = (data.get("courses") or {}).get(str(course_id)) or {}
         disc = res.get("discount_price")
         if isinstance(disc, dict) and disc.get("amount") is not None:
             return "ACTIVE_FREE" if float(disc["amount"]) == 0 else "NOT_FREE"
         price = res.get("price")
+        if isinstance(price, dict) and price.get("amount") is not None and float(price["amount"]) == 0:
+            return "ACTIVE_FREE"          # the course itself costs nothing
         if isinstance(price, dict) and price.get("amount") is not None and float(price["amount"]) > 0:
             return "NOT_FREE"             # price shown, no coupon discount applied: coupon is dead
         return None
@@ -283,6 +287,11 @@ def assess(d, cfg, now):
     or WAIT (cannot confirm now; try again next run). Udemy's own answer wins; otherwise the feed's own
     freshness data is used; otherwise nothing is sent."""
     meta = d.get("meta") or {}
+    if meta.get("no_coupon"):                 # listed as free with no coupon: only Udemy's own price can confirm it
+        v = udemy_price_check(d["url"], meta.get("course_id"))
+        if v == "ACTIVE_FREE":
+            return "SEND", "✅ Verified free on Udemy"
+        return ("SKIP", "") if v == "NOT_FREE" else ("WAIT", "")
     v = verify_udemy_coupon(d["url"], meta.get("course_id"))
     if v == "ACTIVE_FREE":
         return "SEND", "✅ Verified free on Udemy"
@@ -554,25 +563,80 @@ def source_courson(cfg):
 
 
 # ---------- lazy sources (titles first, coupon link only for matching titles) ----------
-def source_discudemy(cfg):
+def fetch_feed_text(url):
+    """RSS/Atom text; some feeds arrive gzip-compressed."""
+    import gzip
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/rss+xml,application/xml,*/*",
+                                               "Accept-Encoding": "identity"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        raw = r.read()
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8", "replace")
+
+
+def source_comidoc(cfg):
+    """Comidoc RSS. The free feed has no coupon codes, so only courses it lists as free with
+    'no coupon needed' are used (Udemy's price is checked before anything is sent)."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(fetch_feed_text(cfg.get("comidoc_feed", "https://comidoc.com/rss.xml")))
     out = []
+    for it in root.findall(".//item"):
+        title = (it.findtext("title") or "").strip()
+        desc = strip_tags(it.findtext("description") or "")
+        link = (it.findtext("link") or "").strip()
+        m = re.search(r"/udemy/([A-Za-z0-9_\-]+)", urllib.parse.urlparse(link).path)
+        if not title or not m:
+            continue
+        slug = m.group(1)
+        encoded = next((k.text or "" for k in it if k.tag.endswith("encoded")), "")
+        coupon_url = find_udemy_url(encoded or (it.findtext("description") or ""))
+        if coupon_url:
+            dd = deal(title, coupon_url, "comidoc", 100, [], desc)
+        elif re.search(r"no coupon needed", desc, re.I):
+            dd = deal(title, f"https://www.udemy.com/course/{slug}/", "comidoc", 100, [], desc)
+            dd["meta"] = {"no_coupon": True}
+        else:
+            continue                    # discounted but not free, or a coupon whose code the free feed hides
+        dd["meta"] = {**dd.get("meta", {}), "listed_at": parse_time(it.findtext("pubDate"))}
+        out.append(dd)
+    return out
+
+
+DISCUDEMY_HOSTS = ("www.couponami.com", "www.discudemy.com")   # DiscUdemy is now called Couponami
+
+
+def source_discudemy(cfg):
+    out, host = [], None
     for page in range(1, cfg.get("pages_html", 3) + 1):
-        try:
-            page_html = http_html(f"https://www.discudemy.com/all/{page}", "https://www.discudemy.com")
-        except Exception:
-            if page == 1:
-                raise
-            break
-        found = anchors(page_html, "card-header")
+        found = []
+        for h in ([host] if host else list(DISCUDEMY_HOSTS)):
+            try:
+                found = anchors(http_html(f"https://{h}/all/{page}", f"https://{h}"), "card-header")
+            except Exception as e:
+                print(f"[discudemy] {h} page {page}: {e}")
+                found = []
+            if found:
+                host = h
+                break
         if not found:
+            if page == 1:
+                raise RuntimeError("no listing from couponami.com or discudemy.com")
             break
         for it in found:
             gid = it["href"].rstrip("/").split("/")[-1]
             title = html.unescape(it["text"]).strip()
             if gid and title:
-                out.append(lazy_deal(title, f"discudemy:{gid}", "discudemy",
-                                     lambda g=gid: find_udemy_url(http_html(f"https://www.discudemy.com/go/{g}",
-                                                                           "https://www.discudemy.com"))))
+                def resolve(g=gid, first=host):
+                    for h in [first] + [x for x in DISCUDEMY_HOSTS if x != first]:
+                        try:
+                            got = find_udemy_url(http_html(f"https://{h}/go/{g}", f"https://{h}"))
+                        except Exception:
+                            got = ""
+                        if got:
+                            return got
+                    return ""
+                out.append(lazy_deal(title, f"discudemy:{gid}", "discudemy", resolve))
     return out
 
 
@@ -732,6 +796,7 @@ SOURCES = {
     "discudemy": source_discudemy,
     "udemyfreebies": source_udemyfreebies,
     "idownloadcoupon": source_idownloadcoupon,
+    "comidoc": source_comidoc,
     "telegram": source_telegram,
     "reddit": source_reddit,
 }
@@ -828,7 +893,8 @@ def format_deal(d, now=None):
     when = age_text(meta.get("listed_at"), now)
     if when:
         lines.append(f"🕒 Listed {when}")
-    lines.append("⚡ Free coupons run out fast - open it now")
+    lines.append("✅ Free course - no coupon needed" if (d.get("meta") or {}).get("no_coupon")
+                 else "⚡ Free coupons run out fast - open it now")
     lines.append(f"🔗 {html.escape(d['url'])}")
     if d.get("note"):
         lines.append(html.escape(d["note"]))
@@ -1307,8 +1373,119 @@ def diagnose_social():
                 print(f"   resolve test: {type(e).__name__} | {d['title'][:50]}")
 
 
+def install_dns_fallback():
+    """Used only by --probe: if this computer's DNS fails for a site, ask Google's DNS-over-HTTPS instead.
+    Nothing on the computer is changed; it only affects this one run of the script."""
+    import socket
+    real = socket.getaddrinfo
+
+    def patched(host, port, *args, **kwargs):
+        try:
+            return real(host, port, *args, **kwargs)
+        except socket.gaierror:
+            if not isinstance(host, str) or host.replace(".", "").isdigit():
+                raise
+            try:
+                req = urllib.request.Request(f"https://8.8.8.8/resolve?name={urllib.parse.quote(host)}&type=A",
+                                             headers={"Accept": "application/dns-json"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    answers = json.loads(r.read().decode()).get("Answer") or []
+            except Exception as e:
+                print(f"   (Google DNS lookup for {host} failed too: {type(e).__name__}: {str(e)[:90]})")
+                raise
+            ips = [a["data"] for a in answers if a.get("type") == 1]
+            if not ips:
+                print(f"   (Google DNS has no address for {host})")
+                raise
+            print(f"   (system DNS failed for {host}; used Google DNS: {ips[0]})")
+            return real(ips[0], port, *args, **kwargs)
+
+    socket.getaddrinfo = patched
+
+
+def probe_feed(url):
+    """Download an RSS/Atom feed, decompress it if needed, and count items that carry a Udemy coupon link."""
+    import gzip
+    import xml.etree.ElementTree as ET
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/rss+xml,application/xml,*/*",
+                                                   "Accept-Encoding": "identity"})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            raw = r.read()
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
+        text = raw.decode("utf-8", "replace")
+        root = ET.fromstring(text)
+    except Exception as e:
+        print(f"  feed {url[:70]}: could not read ({type(e).__name__}: {str(e)[:70]})")
+        return
+    items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+    coupon_items = sum(1 for _ in re.finditer(r"couponCode=", html.unescape(text)))
+    print(f"  feed {url[:70]}: {len(items)} items, 'couponCode=' appears {coupon_items} times")
+    for it in items[:2]:
+        kids = {k.tag.split('}')[-1]: (k.text or k.attrib.get("href") or "").strip() for k in it}
+        print("    item:", {k: v[:90] for k, v in list(kids.items())[:6]})
+
+
+def diagnose_probe():
+    print("probe version 16 (with DNS fallback, feed check, UTF-8 output)")
+    install_dns_fallback()
+    """--probe: test candidate coupon sites from this computer (reachable? coupon links? RSS? WordPress API?)."""
+    cfg = load_json(CONFIG_FILE, {})
+    sites = cfg.get("probe_sites") or ["https://comidoc.com/coupons", "https://www.coursesoup.com/",
+                                        "https://www.couponami.com/", "https://www.couponami.com/all/1",
+                                        "https://www.discudemy.com/all/1"]
+    for url in sites:
+        host = urllib.parse.urlparse(url).netloc
+        print(f"\n=== {url}")
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.8"})
+            with urllib.request.urlopen(req, timeout=25) as r:
+                body = r.read().decode("utf-8", "replace")
+                print(f"  HTTP {r.status}, {len(body)} chars, final URL: {r.geturl()[:80]}")
+        except urllib.error.HTTPError as e:
+            print(f"  HTTP {e.code} (blocked or missing)")
+            continue
+        except Exception as e:
+            print(f"  not reachable: {type(e).__name__}: {str(e)[:80]}")
+            continue
+        udemy = re.findall(r'https?://(?:www\.)?udemy\.com/course/[^\s"\'<>]+', html.unescape(body))
+        with_code = [u for u in udemy if "couponCode=" in u]
+        print(f"  Udemy links on the page: {len(udemy)} (with coupon code: {len(with_code)})")
+        rss = re.findall(r'<link[^>]+type="application/(?:rss|atom)\+xml"[^>]*href="([^"]+)"', body, re.I)
+        print("  RSS/Atom links:", rss[:3] or "none")
+        for feed in rss[:2]:
+            probe_feed(urllib.parse.urljoin(url, feed))
+        inner = [urllib.parse.urljoin(url, h) for h in re.findall(r'href="([^"#]+)"', body)
+                 if urllib.parse.urlparse(urllib.parse.urljoin(url, h)).netloc == host
+                 and re.search(r"/(udemy|course|coupon|free|deal)[^/]*/[^/]+", h)]
+        for link in list(dict.fromkeys(inner))[:2]:
+            try:
+                got = _open_and_find(link)
+                print(f"  page test: {'COUPON FOUND' if got else 'opened, no coupon link'} | {link[:70]}")
+            except urllib.error.HTTPError as e:
+                print(f"  page test: HTTP {e.code} | {link[:70]}")
+            except Exception as e:
+                print(f"  page test: {type(e).__name__} | {link[:70]}")
+        try:
+            req = urllib.request.Request(urllib.parse.urljoin(url, "/wp-json/wp/v2/posts?per_page=1"), headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                print("  WordPress API: yes (HTTP", r.status, ")")
+        except Exception:
+            print("  WordPress API: no")
+
+
 # ---------- main ----------
 def main():
+    for stream in (sys.stdout, sys.stderr):      # Windows consoles often cannot print every character
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if "--probe" in sys.argv:
+        diagnose_probe()
+        return
+
     if "--social" in sys.argv:
         diagnose_social()
         return

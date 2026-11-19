@@ -192,7 +192,8 @@
     "discudemy",
     "udemyfreebies",
     "idownloadcoupon",
-    "telegram"
+    "telegram",
+    "comidoc"
   ],
   "pages": 5,
   "max_messages_per_run": 10,

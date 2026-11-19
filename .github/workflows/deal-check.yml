@@ -37,6 +37,10 @@ jobs:
           for f in seen.json state.json history.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
+          # tracked.json changes on every run and is not worth saving; drop other unstaged changes
+          # so that "git pull --rebase" does not refuse to run
+          git checkout -- . 2>/dev/null || true
+          git clean -fdq -e seen.json -e state.json -e history.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "nothing to save"
             exit 0

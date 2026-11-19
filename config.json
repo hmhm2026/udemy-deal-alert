@@ -191,7 +191,9 @@
     "courson",
     "discudemy",
     "udemyfreebies",
-    "idownloadcoupon"
+    "idownloadcoupon",
+    "telegram",
+    "reddit"
   ],
   "pages": 5,
   "max_messages_per_run": 10,
@@ -200,5 +202,11 @@
   "match_description": false,
   "pages_html": 3,
   "max_resolves_per_run": 25,
-  "max_verifies_per_run": 25
+  "max_verifies_per_run": 25,
+  "telegram_channels": [
+    "udemy4u"
+  ],
+  "reddit_subs": [
+    "udemyfreebies"
+  ]
 }

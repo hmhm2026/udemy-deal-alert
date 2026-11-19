@@ -314,6 +314,12 @@ def parse_time(v):
     """'2026-11-19 09:43:07' or 'Thu, 19 Nov 2026 09:41:22 GMT' (both UTC) -> aware datetime, or None."""
     if not v or not isinstance(v, str):
         return None
+    try:
+        t = datetime.fromisoformat(v.strip().replace("Z", "+00:00"))
+        if t.tzinfo:
+            return t.astimezone(timezone.utc)
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%a, %d %b %Y %H:%M:%S GMT", "%Y-%m-%dT%H:%M:%S"):
         try:
             return datetime.strptime(v.strip(), fmt).replace(tzinfo=timezone.utc)
@@ -568,12 +574,77 @@ def source_idownloadcoupon(cfg):
     return out
 
 
+# ---------- phase 5: social sources (direct: the post contains the Udemy coupon link) ----------
+def _post_discount(text):
+    pcts = discount_percents(text)
+    return 100 if (100 in pcts or not pcts) else max(pcts)
+
+
+def source_telegram(cfg):
+    """Public Telegram channels through their web preview (t.me/s/<channel>), newest posts only."""
+    out = []
+    for ch in cfg.get("telegram_channels", ["udemy4u"]):
+        try:
+            page = http_html(f"https://t.me/s/{urllib.parse.quote(ch)}", "https://t.me/")
+        except Exception as e:
+            print(f"[telegram:{ch}] skipped: {e}")
+            if len(cfg.get("telegram_channels", [])) <= 1:
+                raise
+            continue
+        for chunk in page.split("tgme_widget_message_wrap")[1:]:
+            link = find_udemy_url(chunk)
+            if not link:
+                continue
+            m = re.search(r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', chunk, re.S)
+            text = strip_tags(re.sub(r"<br\s*/?>", "\n", m.group(1))) if m else ""
+            title = next((ln.strip(" -*|:#") for ln in text.split("\n") if len(ln.strip()) > 8), "")
+            if not title:
+                title = urllib.parse.urlparse(link).path.strip("/").split("/")[-1].replace("-", " ").title()
+            t = re.search(r'<time[^>]*datetime="([^"]+)"', chunk)
+            dd = deal(title[:120], link, f"telegram:{ch}", _post_discount(text), [], text)
+            dd["meta"] = {"listed_at": parse_time(t.group(1)) if t else None}
+            out.append(dd)
+    return out
+
+
+def source_reddit(cfg):
+    """Reddit subreddits through their public RSS feed."""
+    import xml.etree.ElementTree as ET
+    out = []
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    for sub in cfg.get("reddit_subs", ["udemyfreebies"]):
+        try:
+            body = http_request(f"https://www.reddit.com/r/{urllib.parse.quote(sub)}/new/.rss?limit=100",
+                                headers={"Accept": "application/atom+xml,application/xml,*/*"})
+            root = ET.fromstring(body)
+        except Exception as e:
+            print(f"[reddit:{sub}] skipped: {e}")
+            if len(cfg.get("reddit_subs", [])) <= 1:
+                raise
+            continue
+        for ent in root.findall("a:entry", ns):
+            title = (ent.findtext("a:title", "", ns) or "").strip()
+            content = ent.findtext("a:content", "", ns) or ""
+            link = find_udemy_url(content) or find_udemy_url(" ".join(
+                x.get("href", "") for x in ent.findall("a:link", ns)))
+            if not link:
+                continue
+            clean = re.sub(r"^\s*[\[(][^\])]{0,25}[\])]\s*", "", title) or title
+            dd = deal(clean[:120], link, f"reddit:{sub}", _post_discount(title + " " + strip_tags(content)), [],
+                      strip_tags(content))
+            dd["meta"] = {"listed_at": parse_time(ent.findtext("a:updated", "", ns))}
+            out.append(dd)
+    return out
+
+
 SOURCES = {
     "realdiscount": source_realdiscount,
     "courson": source_courson,
     "discudemy": source_discudemy,
     "udemyfreebies": source_udemyfreebies,
     "idownloadcoupon": source_idownloadcoupon,
+    "telegram": source_telegram,
+    "reddit": source_reddit,
 }
 
 

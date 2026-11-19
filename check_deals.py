@@ -35,6 +35,7 @@ ROOT = Path(__file__).parent
 CONFIG_FILE = ROOT / "config.json"
 SEEN_FILE = ROOT / "seen.json"
 STATE_FILE = ROOT / "state.json"   # source health + weekly stats (committed by the workflow)
+HISTORY_FILE = ROOT / "history.json"  # recent alerts, shown on the GitHub Pages page
 TRACKED_FILE = ROOT / "tracked.json"  # coupons retained for periodic validity checks
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -1410,6 +1411,19 @@ def main():
         tg_send(format_deal(d, now), button=("Open course", d["url"]))
         state["sent"].append({"t": d["title"][:80], "s": d["source"]})
     state["sent"] = state["sent"][-200:]
+    if loud:
+        history = load_json(HISTORY_FILE, [])
+        history = history if isinstance(history, list) else []
+        known = {h.get("url") for h in history if isinstance(h, dict)}
+        for d in loud:
+            if d["url"] in known:
+                continue
+            listed = (d.get("meta") or {}).get("listed_at")
+            history.append({"title": d["title"], "url": d["url"], "source": d["source"],
+                            "at": now.isoformat(timespec="seconds"),
+                            "listed": listed.isoformat(timespec="seconds") if listed else "",
+                            "note": d.get("note", "")})
+        HISTORY_FILE.write_text(json.dumps(history[-300:], indent=1, ensure_ascii=False), encoding="utf-8")
 
     chunk = cfg.get("digest_chunk", 10)
     for i in range(0, len(digest), chunk):

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Free Testing Courses</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #14181f; --muted: #5b6573; --line: #e3e7ec;
+    --accent: #0f766e; --accent-ink: #ffffff; --warn-bg: #fff4e0; --warn-ink: #8a5300; --ok: #0f766e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117; --card: #161b22; --text: #e6edf3; --muted: #9aa5b1; --line: #2a313b;
+      --accent: #2dd4bf; --accent-ink: #04201c; --warn-bg: #3a2a0a; --warn-ink: #ffcc80; --ok: #2dd4bf;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  header { padding: 24px 0 12px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0; font-size: .95rem; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  input[type=search] {
+    flex: 1 1 180px; min-width: 0; padding: 11px 14px; font: inherit; color: var(--text);
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  }
+  button.chip {
+    padding: 10px 14px; font: inherit; font-size: .92rem; cursor: pointer; color: var(--text);
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  }
+  button.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .count { color: var(--muted); font-size: .9rem; margin: 0 0 8px; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  li.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .title { font-weight: 650; margin: 0 0 6px; overflow-wrap: anywhere; }
+  .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: .88rem; margin-bottom: 10px; }
+  .ok { color: var(--ok); }
+  .old { display: inline-block; background: var(--warn-bg); color: var(--warn-ink); border-radius: 6px; padding: 2px 8px; font-size: .82rem; margin-bottom: 10px; }
+  a.open {
+    display: inline-block; padding: 10px 18px; border-radius: 10px; text-decoration: none; font-weight: 600;
+    background: var(--accent); color: var(--accent-ink);
+  }
+  a.open.dim { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .empty { text-align: center; color: var(--muted); padding: 48px 8px; }
+  footer { color: var(--muted); font-size: .82rem; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Free Testing Courses</h1>
+    <p class="sub">Courses sent by the bot, newest first. Free coupons end fast, so open them quickly.</p>
+  </header>
+
+  <div class="tools">
+    <input id="q" type="search" placeholder="Search courses" aria-label="Search courses" autocomplete="off">
+    <button class="chip" id="f24" aria-pressed="true">Last 24 h</button>
+    <button class="chip" id="fall" aria-pressed="false">All</button>
+    <button class="chip" id="refresh">Refresh</button>
+  </div>
+
+  <p class="count" id="count" role="status"></p>
+  <ul id="list"></ul>
+  <footer id="foot"></footer>
+</div>
+
+<script>
+(function () {
+  var SOURCES = [
+    "https://raw.githubusercontent.com/hmhm2026/udemy-deal-alert/main/history.json",
+    "history.json"
+  ];
+  var all = [], onlyRecent = true, loadedAt = null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function ago(iso) {
+    var t = Date.parse(iso);
+    if (isNaN(t)) return "";
+    var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 1) return "just now";
+    if (m < 60) return m + " min ago";
+    if (m < 48 * 60) return Math.floor(m / 60) + " h ago";
+    return Math.floor(m / 1440) + " days ago";
+  }
+  function ageHours(iso) {
+    var t = Date.parse(iso);
+    return isNaN(t) ? 9999 : (Date.now() - t) / 3600000;
+  }
+  function safeUrl(u) {
+    return typeof u === "string" && /^https:\/\/(www\.)?udemy\.com\//.test(u) ? u : "";
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function render() {
+    var q = $("q").value.trim().toLowerCase();
+    var rows = all.filter(function (h) {
+      if (onlyRecent && ageHours(h.at) > 24) return false;
+      return !q || (h.title || "").toLowerCase().indexOf(q) !== -1;
+    });
+    var list = $("list");
+    list.textContent = "";
+    $("count").textContent = rows.length + (rows.length === 1 ? " course" : " courses");
+    if (!rows.length) {
+      var li = el("li", "empty", all.length
+        ? "Nothing in this view. Try All."
+        : "No courses yet. The bot adds one here each time it sends an alert.");
+      list.appendChild(li);
+    }
+    rows.forEach(function (h) {
+      var url = safeUrl(h.url);
+      var li = el("li", "card");
+      li.appendChild(el("p", "title", h.title || "Untitled course"));
+      var meta = el("div", "meta");
+      meta.appendChild(el("span", "", "Sent " + ago(h.at)));
+      if (h.listed) meta.appendChild(el("span", "", "Listed " + ago(h.listed)));
+      if (h.source) meta.appendChild(el("span", "", h.source));
+      if (h.note) meta.appendChild(el("span", /Verified/.test(h.note) ? "ok" : "", h.note.replace(/^[^\w]+/, "")));
+      li.appendChild(meta);
+      var stale = ageHours(h.at) > 24;
+      if (stale) li.appendChild(el("div", "old", "Sent over 24 h ago - the coupon may have ended"));
+      if (url) {
+        var a = el("a", "open" + (stale ? " dim" : ""), "Open course");
+        a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+        li.appendChild(a);
+      }
+      list.appendChild(li);
+    });
+    $("foot").textContent = loadedAt ? "Updated " + ago(loadedAt.toISOString()) : "";
+  }
+
+  function load(i) {
+    i = i || 0;
+    if (i >= SOURCES.length) { $("count").textContent = "Could not load the list."; return; }
+    var sep = SOURCES[i].indexOf("?") === -1 ? "?" : "&";
+    fetch(SOURCES[i] + sep + "t=" + Date.now(), { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (data) {
+        all = (Array.isArray(data) ? data : []).slice().sort(function (a, b) {
+          return Date.parse(b.at) - Date.parse(a.at);
+        });
+        loadedAt = new Date();
+        render();
+      })
+      .catch(function () { load(i + 1); });
+  }
+
+  function setMode(recent) {
+    onlyRecent = recent;
+    $("f24").setAttribute("aria-pressed", recent);
+    $("fall").setAttribute("aria-pressed", !recent);
+    render();
+  }
+  $("q").addEventListener("input", render);
+  $("f24").addEventListener("click", function () { setMode(true); });
+  $("fall").addEventListener("click", function () { setMode(false); });
+  $("refresh").addEventListener("click", function () { load(0); });
+  setInterval(function () { load(0); }, 120000);
+  load(0);
+})();
+</script>
+</body>
+</html>

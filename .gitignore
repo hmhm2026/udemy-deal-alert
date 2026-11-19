@@ -1,3 +1,9 @@
 __pycache__/
 *.pyc
 .env
+udemy_profile/
+open_udemy_login.py
+check_deals_before_filter.py
+dry.txt
+raw.txt
+fields.txt

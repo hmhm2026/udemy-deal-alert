@@ -580,29 +580,57 @@ def _post_discount(text):
     return 100 if (100 in pcts or not pcts) else max(pcts)
 
 
+def _open_and_find(url):
+    """Open a post page (following redirects) and return the Udemy coupon link found in it or its final URL."""
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.8",
+                                               "Accept-Language": "en-US,en;q=0.9"})
+    with urllib.request.urlopen(req, timeout=25) as r:
+        return find_udemy_url(r.geturl()) or find_udemy_url(r.read().decode("utf-8", "replace"))
+
+
+def _external_link(chunk):
+    for h in re.findall(r'href="(https?://[^"]+)"', chunk):
+        h = html.unescape(h)
+        host = urllib.parse.urlparse(h).netloc.lower()
+        if host and not host.endswith(("t.me", "telegram.me", "telegram.org", "example.com", "udemy.com")):
+            return h
+    return ""
+
+
 def source_telegram(cfg):
-    """Public Telegram channels through their web preview (t.me/s/<channel>), newest posts only."""
+    """Public Telegram channels through their web preview (t.me/s/<channel>), newest posts only.
+
+    A post that carries the Udemy coupon link is used directly. A post that only links to the channel's
+    own website becomes a lazy item: the page is opened later, only if the title matches your keywords."""
     out = []
-    for ch in cfg.get("telegram_channels", ["udemy4u"]):
+    channels = cfg.get("telegram_channels", ["udemy4u"])
+    for ch in channels:
         try:
             page = http_html(f"https://t.me/s/{urllib.parse.quote(ch)}", "https://t.me/")
         except Exception as e:
             print(f"[telegram:{ch}] skipped: {e}")
-            if len(cfg.get("telegram_channels", [])) <= 1:
+            if len(channels) <= 1:
                 raise
             continue
         for chunk in page.split("tgme_widget_message_wrap")[1:]:
-            link = find_udemy_url(chunk)
-            if not link:
-                continue
             m = re.search(r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', chunk, re.S)
             text = strip_tags(re.sub(r"<br\s*/?>", "\n", m.group(1))) if m else ""
             title = next((ln.strip(" -*|:#") for ln in text.split("\n") if len(ln.strip()) > 8), "")
-            if not title:
-                title = urllib.parse.urlparse(link).path.strip("/").split("/")[-1].replace("-", " ").title()
             t = re.search(r'<time[^>]*datetime="([^"]+)"', chunk)
-            dd = deal(title[:120], link, f"telegram:{ch}", _post_discount(text), [], text)
-            dd["meta"] = {"listed_at": parse_time(t.group(1)) if t else None}
+            listed = parse_time(t.group(1)) if t else None
+            link = find_udemy_url(chunk)
+            if link:
+                if not title:
+                    title = urllib.parse.urlparse(link).path.strip("/").split("/")[-1].replace("-", " ").title()
+                dd = deal(title[:120], link, f"telegram:{ch}", _post_discount(text), [], text)
+            else:
+                ext = _external_link(chunk)
+                pid = re.search(r'data-post="([^"]+)"', chunk)
+                if not ext or not title or not pid:
+                    continue
+                dd = lazy_deal(title[:120], f"tg:{pid.group(1)}", f"telegram:{ch}",
+                               lambda u=ext: _open_and_find(u))
+            dd["meta"] = {"listed_at": listed}
             out.append(dd)
     return out
 
@@ -1131,8 +1159,44 @@ def diagnose_fields():
         print("  price API verdict (ACTIVE_FREE / NOT_FREE / None):", udemy_price_check(link, c0.get("id")))
 
 
+def diagnose_social():
+    """--social: for each Telegram channel, show how many posts it has and which link domains they use."""
+    cfg = load_json(CONFIG_FILE, {})
+    for ch in cfg.get("telegram_channels", ["udemy4u"]):
+        try:
+            page = http_html(f"https://t.me/s/{urllib.parse.quote(ch)}", "https://t.me/")
+        except Exception as e:
+            print(f"[{ch}] ERROR: {e}")
+            continue
+        chunks = page.split("tgme_widget_message_wrap")[1:]
+        doms = Counter()
+        for c in chunks:
+            for h in re.findall(r'href="(https?://[^"]+)"', c):
+                doms[urllib.parse.urlparse(html.unescape(h)).netloc] += 1
+        with_coupon = sum(1 for c in chunks if find_udemy_url(c))
+        print(f"[{ch}] posts: {len(chunks)}, with Udemy coupon link: {with_coupon}")
+        print("   link domains:", dict(doms.most_common(6)))
+        try:
+            lazy = [d for d in source_telegram({"telegram_channels": [ch]}) if d["resolve"]][:2]
+        except Exception as e:
+            print("   resolve test: could not read channel:", e)
+            continue
+        for d in lazy:
+            try:
+                got = d["resolve"]()
+                print("   resolve test:", "COUPON FOUND" if got else "page opened, no coupon link in it", "|", d["title"][:50])
+            except urllib.error.HTTPError as e:
+                print(f"   resolve test: HTTP {e.code} (site blocks us) | {d['title'][:50]}")
+            except Exception as e:
+                print(f"   resolve test: {type(e).__name__} | {d['title'][:50]}")
+
+
 # ---------- main ----------
 def main():
+    if "--social" in sys.argv:
+        diagnose_social()
+        return
+
     if "--fields" in sys.argv:
         diagnose_fields()
         return

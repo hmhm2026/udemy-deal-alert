@@ -192,8 +192,7 @@
     "discudemy",
     "udemyfreebies",
     "idownloadcoupon",
-    "telegram",
-    "reddit"
+    "telegram"
   ],
   "pages": 5,
   "max_messages_per_run": 10,
@@ -204,9 +203,6 @@
   "max_resolves_per_run": 25,
   "max_verifies_per_run": 25,
   "telegram_channels": [
-    "udemy4u"
-  ],
-  "reddit_subs": [
-    "udemyfreebies"
+    "Coursevania"
   ]
 }

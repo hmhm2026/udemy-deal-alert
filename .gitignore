@@ -14,3 +14,5 @@ dry.txt
 raw.txt
 fields.txt
 probe.txt
+local_checked.json
+local_shots/

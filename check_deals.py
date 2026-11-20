@@ -508,6 +508,16 @@ def source_realdiscount(cfg):
     return out
 
 
+def _as_list(v):
+    """A list of short strings from a feed field that may be a list, a Python-style list text, or empty."""
+    try:
+        if isinstance(v, str):
+            v = ast_literal(v)
+        return [str(x).strip() for x in (v or []) if str(x).strip()][:12]
+    except Exception:
+        return []
+
+
 def _instructor_name(v):
     """Instructor label from courson's 'instructors' field (a list of {name: profile_url}), or ''."""
     try:
@@ -545,7 +555,7 @@ def source_courson(cfg):
             slug, code = c.get("id_name"), c.get("coupon_code")
             if not slug or not code:
                 continue
-            cats = [c.get("category"), c.get("subcategory"), c.get("topic")]
+            cats = [c.get("category"), c.get("subcategory"), c.get("topic"), c.get("primary_category"), c.get("primary_subcategory")]
             headline = c.get("headline") or ""
             title = headline if 0 < len(headline) <= 100 else slug.replace("-", " ").title()
             pct = to_float(c.get("coupon_discount_percent"))
@@ -557,7 +567,8 @@ def source_courson(cfg):
                           "refreshed_at": parse_time(c.get("last_udemy_refresh")),
                           "reviews": to_float(c.get("num_reviews")), "students": to_float(c.get("num_subscribers")),
                           "created_at": parse_time(c.get("created_date")),
-                          "instructor": _instructor_name(c.get("instructors"))}
+                          "instructor": _instructor_name(c.get("instructors")),
+                          "labels": _as_list(c.get("labels"))}
             out.append(dd)
     return out
 
@@ -805,7 +816,7 @@ SOURCES = {
 # ---------- filtering ----------
 def haystack(d, cfg):
     slug = urllib.parse.urlparse(d["url"]).path.strip("/").split("/")[-1].replace("-", " ") if d["url"] else ""
-    parts = [d["title"], " ".join(d["categories"]), slug]
+    parts = [d["title"], " ".join(d["categories"]), slug, " ".join((d.get("meta") or {}).get("labels") or [])]
     if cfg.get("match_description", False):
         parts.append(d["text"])
     return " ".join(parts).lower()
@@ -929,6 +940,7 @@ def load_state():
     s.setdefault("awaiting", "")        # phase 2: "add" | "remove" after a bare /add or /remove
     s.setdefault("min_rating", None)    # phase 6: None = use config.json, 0 = off
     s.setdefault("min_students", None)  # phase 6: None = use config.json, 0 = off
+    s.setdefault("stats_refs", {})      # this week: testing courses seen -> what happened to each
     s.setdefault("await_until", "")     # phase 2: ISO time (UTC) when that wait expires
     return s
 
@@ -961,6 +973,42 @@ def update_health(state, results, cfg, notify):
     return changed
 
 
+OUTCOME_ICON = {"sent": "✅", "expired": "⏱", "quality": "⭐", "waiting": "⏳"}
+OUTCOME_TEXT = {"sent": "sent", "expired": "coupon already ended", "quality": "filtered by quality",
+                "waiting": "could not be confirmed"}
+
+
+def record(state, ref, title, outcome, now):
+    """Remember what happened to a keyword-matching course (once per course; the outcome can still change)."""
+    refs = state["stats_refs"]
+    if refs.get(ref, {}).get("o") == outcome:
+        return
+    refs.pop(ref, None)
+    refs[ref] = {"t": title[:80], "o": outcome, "at": now.isoformat(timespec="minutes")}
+    while len(refs) > 400:
+        refs.pop(next(iter(refs)))
+
+
+def stats_line(state):
+    c = Counter(v.get("o") for v in state.get("stats_refs", {}).values())
+    total = sum(c.values())
+    if not total:
+        return "🔎 No testing courses matched your keywords in this period."
+    return (f"🔎 Testing courses found: {total}\n"
+            f"✅ sent {c['sent']} · ⏱ already ended {c['expired']} · "
+            f"⭐ filtered {c['quality']} · ⏳ unconfirmed {c['waiting']}")
+
+
+def missed_text(state, limit=10):
+    rows = [v for v in state.get("stats_refs", {}).values() if v.get("o") != "sent"][-limit:]
+    if not rows:
+        return "Nothing missed: every matching course was either sent or none matched."
+    lines = ["🕵️ <b>Matching courses that were NOT sent</b> (newest last)"]
+    for v in rows:
+        lines.append(f"{OUTCOME_ICON.get(v['o'], '•')} {html.escape(v['t'])} - {OUTCOME_TEXT.get(v['o'], v['o'])}")
+    return "\n".join(lines)
+
+
 def build_summary(state, cfg):
     sent = state.get("sent", [])
     lines = ["📊 <b>Weekly summary</b>", f"Courses sent: {len(sent)}"]
@@ -971,6 +1019,8 @@ def build_summary(state, cfg):
         lines.append(f"• {html.escape(x.get('t', ''))}")
     if len(sent) > 15:
         lines.append(f"<i>(+{len(sent) - 15} more)</i>")
+    lines.append("")
+    lines.append(stats_line(state))
     lines.append("")
     lines.append("<b>Sources</b>")
     for name in cfg.get("sources", list(SOURCES)):
@@ -993,7 +1043,7 @@ def maybe_weekly_summary(state, cfg, notify, now=None):
     if now.hour < cfg.get("summary_hour_utc", 7):      # 7 UTC = 9:00 in Egypt
         return False
     notify(build_summary(state, cfg))
-    state["sent"], state["last_summary"] = [], today
+    state["sent"], state["last_summary"], state["stats_refs"] = [], today, {}
     return True
 
 
@@ -1010,6 +1060,8 @@ HELP_TEXT = (
     "/resume - turn alerts back on\n"
     "/minrating 3.5 - skip courses with a proven low rating (0 = off)\n"
     "/minstudents 100 - skip old courses with few students (0 = off)\n"
+    "/stats - how many testing courses were found this week and what happened to them\n"
+    "/missed - matching courses that were NOT sent, and why\n"
     "/status - pause state, filters and source health\n\n"
     "Commands are read every few minutes, so the reply is not instant."
 )
@@ -1213,6 +1265,12 @@ def handle_command(text, state, cfg, now):
             note = (f"Courses with fewer than {int(val)} students are skipped, but only when they are older than "
                     f"{MIN_AGE_DAYS_FOR_STUDENTS} days. New courses are always sent.") if val else ""
         return (f"✅ {cmd[1:]} set to {val:g}. " + note) if val else f"✅ {cmd[1:]} is off.", True
+
+    if cmd == "/stats":
+        return stats_line(state), False
+
+    if cmd == "/missed":
+        return missed_text(state), False
 
     if cmd == "/resume":
         if not state.get("paused_until"):
@@ -1565,6 +1623,7 @@ def main():
     # new, unique, passing the basic rules. Lazy items are resolved only when their title matches.
     new, batch_keys, newly_seen = [], set(), set()
     resolves, fails, verifies = 0, {}, 0
+    stats_before = json.dumps(state["stats_refs"], sort_keys=True)
     qlimits = quality_limits(cfg, state)
     max_ver = cfg.get("max_verifies_per_run", 25)
     max_res = cfg.get("max_resolves_per_run", 25)
@@ -1580,6 +1639,7 @@ def main():
             ok, why = quality_ok(d, qlimits, now)
             if not ok:
                 print(f"[quality] skipped '{d['title'][:50]}': {why}")
+                record(state, ref, d["title"], "quality", now)
                 newly_seen.add(ref)
                 continue
             if verifies >= max_ver:
@@ -1587,6 +1647,7 @@ def main():
             verifies += 1
             verdict, note = assess(d, cfg, now)
             print(f"[verify] {d['title'][:55]}: {verdict} {note}")
+            record(state, ref, d["title"], {"WAIT": "waiting", "SKIP": "expired"}.get(verdict, "sent"), now)
             if verdict == "WAIT":
                 continue
             newly_seen.add(ref)
@@ -1636,6 +1697,7 @@ def main():
         verifies += 1
         verdict, note = assess(d, cfg, now)
         print(f"[verify] {d['title'][:55]}: {verdict} {note}")
+        record(state, ref, d["title"], {"WAIT": "waiting", "SKIP": "expired"}.get(verdict, "sent"), now)
         if verdict == "WAIT":
             continue                      # cannot confirm now: try again next run
         newly_seen.update((ref, key))
@@ -1700,7 +1762,7 @@ def main():
         tg_send(format_digest(part, i, len(digest), dropped if last else 0), silent=True, preview=False)
 
     # source health + weekly summary (state.json is written only when something changed)
-    state_changed = bool(loud)
+    state_changed = bool(loud) or json.dumps(state["stats_refs"], sort_keys=True) != stats_before
     state_changed |= update_health(state, results, cfg, lambda m: tg_send(m, preview=False))
     state_changed |= maybe_weekly_summary(state, cfg, lambda m: tg_send(m, silent=True, preview=False))
     if state_changed:

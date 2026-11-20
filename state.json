@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 1,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error timed out>"
+   "last_error": ""
   },
   "courson": {
    "fails": 0,
@@ -62,6 +62,10 @@
   },
   {
    "t": "Ethical Hacking & Penetration Testing with AI",
+   "s": "real.discount"
+  },
+  {
+   "t": "QA Automation & SDET: Master Technical Interviews",
    "s": "real.discount"
   }
  ],

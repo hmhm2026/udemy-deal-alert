@@ -77,8 +77,14 @@ def recent_entries(hist):
     return out
 
 
-def classify(title, body, status):
+def classify(title, body, status, final_url=""):
     """Pure text classification so it can be tested without a browser."""
+    try:
+        path = urllib.parse.urlparse(final_url).path if final_url else None
+    except Exception:
+        path = None
+    if path is not None and path.strip("/") == "":
+        return "REDIRECTED"
     t = (title or "").lower()
     b = (body or "").lower()
     if status in (403, 429) or "just a moment" in t or "access denied" in t or "captcha" in b[:3000] \
@@ -95,8 +101,9 @@ def classify(title, body, status):
     return "UNKNOWN"
 
 
-ICON = {"FREE": "✅", "ENROLLED": "📚", "PAID": "❌", "ENDED": "❌", "BLOCKED": "⛔", "UNKNOWN": "❓"}
+ICON = {"REDIRECTED": "↪️", "FREE": "✅", "ENROLLED": "📚", "PAID": "❌", "ENDED": "❌", "BLOCKED": "⛔", "UNKNOWN": "❓"}
 TEXT = {
+    "REDIRECTED": "Udemy sent the link to the home page (coupon ended, invalid link, or not available)",
     "FREE": "still free for your account - open it now",
     "ENROLLED": "already in your account",
     "PAID": "coupon ended / not free",
@@ -168,11 +175,17 @@ def do_check(limit, cdp=False):
                 status = resp.status if resp else None
                 page.wait_for_timeout(3500)
                 body = page.inner_text("body")
-                result = classify(page.title(), body, status)
+                final = page.url
+                result = classify(page.title(), body, status, final)
+                print("  final url:", final[:110])
+                import re as _re
+                keys = _re.compile(r"enroll|buy|cart|free|price|coupon|off\b|%|EGP|US\$|\$|go to course|gift|wishlist|expire|ends", _re.I)
+                hits = [x.strip() for x in body.splitlines() if x.strip() and keys.search(x) and len(x) < 120]
+                print("  key lines:", " | ".join(hits[:25]))
             except Exception as e:
                 print("  error:", str(e)[:120])
                 result = "UNKNOWN"
-            if result in ("UNKNOWN", "BLOCKED"):
+            if result in ("UNKNOWN", "BLOCKED", "REDIRECTED"):
                 try:
                     page.screenshot(path=str(SHOTS / f"{int(time.time())}.png"))
                 except Exception:

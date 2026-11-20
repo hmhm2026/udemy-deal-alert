@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "<urlopen error timed out>"
   },
   "courson": {
    "fails": 0,
@@ -21,6 +21,11 @@
    "last_error": ""
   },
   "idownloadcoupon": {
+   "fails": 0,
+   "alerted": false,
+   "last_error": ""
+  },
+  "telegram": {
    "fails": 0,
    "alerted": false,
    "last_error": ""
@@ -64,7 +69,9 @@
  "kw_add": [],
  "kw_remove": [],
  "paused_until": "",
- "tg_offset": 795238373,
+ "tg_offset": 795238374,
  "awaiting": "",
- "await_until": ""
+ "await_until": "",
+ "min_rating": null,
+ "min_students": null
 }

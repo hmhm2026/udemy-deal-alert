@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 1,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error timed out>"
+   "last_error": ""
   },
   "courson": {
    "fails": 0,
@@ -83,5 +83,11 @@
  "await_until": "",
  "min_rating": null,
  "min_students": null,
- "stats_refs": {}
+ "stats_refs": {
+  "playwright-ai-interview-questions-with-answers|1B92E02731EC9DDDE0DA": {
+   "t": "500+ Playwright AI Interview Questions with Answers 2026",
+   "o": "expired",
+   "at": "2026-11-20T16:11+00:00"
+  }
+ }
 }

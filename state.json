@@ -31,7 +31,7 @@
    "last_error": ""
   },
   "comidoc": {
-   "fails": 13,
+   "fails": 14,
    "alerted": true,
    "last_error": "returned 0 items"
   }

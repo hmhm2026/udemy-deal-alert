@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 1,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error timed out>"
+   "last_error": ""
   },
   "courson": {
    "fails": 0,
@@ -31,7 +31,7 @@
    "last_error": ""
   },
   "comidoc": {
-   "fails": 17,
+   "fails": 18,
    "alerted": true,
    "last_error": "returned 0 items"
   }

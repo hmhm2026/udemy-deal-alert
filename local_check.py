@@ -79,6 +79,22 @@ def recent_entries(hist):
     return out
 
 
+def price_state(body):
+    """Read the course's own price block: the first 'Current price' label and the value after it.
+    'Free' -> FREE, an amount -> PAID, nothing found -> None.
+    (Words such as 'Add to cart' also appear on suggested-course cards, so they are not used.)"""
+    lines = [x.strip() for x in (body or "").splitlines() if x.strip()]
+    for i, x in enumerate(lines):
+        if x.lower() == "current price" and i + 1 < len(lines):
+            v = lines[i + 1].lower()
+            if v == "free" or v.startswith("free ") or v in ("0", "egp 0", "egp 0.00"):
+                return "FREE"
+            if any(ch.isdigit() for ch in v):
+                return "PAID"
+            return None
+    return None
+
+
 def classify(title, body, status, final_url=""):
     """Pure text classification so it can be tested without a browser."""
     try:
@@ -96,10 +112,11 @@ def classify(title, body, status, final_url=""):
         return "ENDED"
     if "go to course" in b and "enroll now" not in b:
         return "ENROLLED"
-    if "enroll now" in b and "buy now" not in b and "add to cart" not in b:
+    ps = price_state(body)          # the price block of THIS course (not the suggested-course cards)
+    if ps:
+        return ps
+    if "enroll now" in b and "buy now" not in b:
         return "FREE"
-    if "buy now" in b or "add to cart" in b:
-        return "PAID"
     return "UNKNOWN"
 
 

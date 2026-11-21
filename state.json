@@ -72,6 +72,14 @@
   {
    "t": "QA Automation & SDET: Master Technical Interviews",
    "s": "real.discount"
+  },
+  {
+   "t": "AI Browser Agents with Python & Playwright",
+   "s": "real.discount"
+  },
+  {
+   "t": "Ethical Hacking & Penetration Testing with AI",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-16",
@@ -88,6 +96,16 @@
    "t": "500+ Playwright AI Interview Questions with Answers 2026",
    "o": "expired",
    "at": "2026-11-20T16:11+00:00"
+  },
+  "ai-browser-agents-with-python-playwright|NOVFREE01": {
+   "t": "AI Browser Agents with Python & Playwright",
+   "o": "sent",
+   "at": "2026-11-21T04:01+00:00"
+  },
+  "ethical-hacking-penetration-testing-with-ai|NOVFREE01": {
+   "t": "Ethical Hacking & Penetration Testing with AI",
+   "o": "sent",
+   "at": "2026-11-21T04:01+00:00"
   }
  }
 }

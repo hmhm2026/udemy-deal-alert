@@ -326,6 +326,57 @@ def get_json(url, headers=None, data=None):
         raise RuntimeError(f"not JSON from {urllib.parse.urlparse(url).netloc}; starts with: {body[:120]!r}") from None
 
 
+def _parse_iso(v):
+    try:
+        t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def track_expiry(history, now, max_checks=10, window_hours=48, check_fn=None):
+    """Re-check recently sent coupons and record when each one stops being free.
+
+    last_ok  = last time Udemy confirmed it free (starts as the send time)
+    gone_at  = first time Udemy said it is no longer free
+    ended    = gone_at, written only after a SECOND consecutive "not free" answer (avoids false alarms)
+    Returns True when history.json should be rewritten.
+    """
+    check = check_fn or udemy_price_check
+    cand = []
+    for h in history:
+        if not isinstance(h, dict) or not h.get("url") or h.get("ended"):
+            continue
+        at = _parse_iso(h.get("at"))
+        if at and (now - at) <= timedelta(hours=window_hours):
+            cand.append(h)
+    if not cand:
+        return False
+    cand.sort(key=lambda h: str(h.get("at")))
+    if len(cand) > max_checks:                      # rotate so every coupon is checked in turn
+        off = (int(now.timestamp() // 300) * max_checks) % len(cand)
+        cand = (cand[off:] + cand[:off])[:max_checks]
+    changed = False
+    stamp = now.isoformat(timespec="seconds")
+    for h in cand:
+        v = check(h["url"])
+        if v == "ACTIVE_FREE":
+            last = _parse_iso(h.get("last_ok") or h.get("at"))
+            if h.get("gone_at"):
+                h.pop("gone_at", None)
+                changed = True
+            if not last or (now - last) >= timedelta(minutes=10):
+                h["last_ok"] = stamp
+                changed = True
+        elif v == "NOT_FREE":
+            if h.get("gone_at"):
+                h["ended"] = h["gone_at"]
+            else:
+                h["gone_at"] = stamp
+            changed = True
+    return changed
+
+
 def load_json(path, default):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -1754,6 +1805,12 @@ def main():
                             "listed": listed.isoformat(timespec="seconds") if listed else "",
                             "note": d.get("note", "")})
         HISTORY_FILE.write_text(json.dumps(history[-300:], indent=1, ensure_ascii=False), encoding="utf-8")
+    try:
+        hist2 = load_json(HISTORY_FILE, [])
+        if isinstance(hist2, list) and track_expiry(hist2, now, int(cfg.get("max_expiry_checks", 10))):
+            HISTORY_FILE.write_text(json.dumps(hist2[-300:], indent=1, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        print("[expiry] check failed:", type(exc).__name__, exc)
 
     chunk = cfg.get("digest_chunk", 10)
     for i in range(0, len(digest), chunk):

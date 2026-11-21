@@ -14,7 +14,7 @@
   :root {
     --bg: #e8e3f8; --ticket: #ffffff; --ink: #1c1240; --muted: #5d5580; --rule: #cfc7ea;
     --stub: #2a1b5e; --stub-ink: #ffffff; --hot: #ff7a1a; --hot-ink: #1a0f00;
-    --dead: #d9d4ea; --dead-ink: #6d6690; --pass: #0f7a52;
+    --dead: #d9d4ea; --dead-ink: #6d6690; --pass: #0f7a52; --gone: #b3263e; --gone-ink: #ffffff; --gone-bg: #fde7ea;
     --btn: #1c1240; --btn-ink: #ffffff; --warn-bg: #fff1dc; --warn-ink: #8a5300; --focus: #5b3df5;
     --display: "Unbounded", "Segoe UI", system-ui, sans-serif;
     --body: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -24,7 +24,7 @@
     :root:not([data-theme="light"]) {
       --bg: #120d27; --ticket: #1e1744; --ink: #efeaff; --muted: #a9a0d0; --rule: #3a3068;
       --stub: #2e2468; --stub-ink: #ffffff; --hot: #ff8a33; --hot-ink: #1a0f00;
-      --dead: #2a2352; --dead-ink: #8d84b8; --pass: #5be0a8;
+      --dead: #2a2352; --dead-ink: #8d84b8; --pass: #5be0a8; --gone: #ff6b81; --gone-ink: #2b0008; --gone-bg: #3d1420;
       --btn: #efeaff; --btn-ink: #120d27; --warn-bg: #3a2a0a; --warn-ink: #ffcc80; --focus: #a899ff;
     }
   }
@@ -75,6 +75,9 @@
   li.ticket.fresh .stub { background: var(--hot); color: var(--hot-ink); }
   li.ticket.stale .stub { background: var(--dead); color: var(--dead-ink); }
   li.ticket.stale { opacity: .85; }
+  li.ticket.gone .stub { background: var(--gone); color: var(--gone-ink); }
+  li.ticket.gone .title { color: var(--muted); }
+  .gone-line { display: block; background: var(--gone-bg); color: var(--gone); border-radius: 8px; padding: 6px 10px; font: 600 .85rem/1.35 var(--body); margin-bottom: 12px; }
   /* perforation + notches */
   li.ticket::before, li.ticket::after {
     content: ""; position: absolute; left: 80px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); z-index: 1;
@@ -155,6 +158,24 @@
     var dd = Math.floor(m / 1440);
     return { n: String(dd), u: dd === 1 ? "day" : "days" };
   }
+  function fmtTime(iso) {
+    var t = new Date(iso);
+    if (isNaN(t.getTime())) return "";
+    var same = t.toDateString() === new Date().toDateString();
+    return same
+      ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : t.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+  function endedText(h) {
+    var e = Date.parse(h.ended), l = Date.parse(h.last_ok || h.at);
+    if (isNaN(e)) return "Coupon ended";
+    if (!h.last_ok && (e - l) > 20 * 60000)
+      return "Found ended at " + fmtTime(h.ended) + " (" + ago(h.ended) + "), it may have ended earlier";
+    var txt = (!isNaN(l) && (e - l) > 20 * 60000)
+      ? "Coupon ended between " + fmtTime(h.last_ok || h.at) + " and " + fmtTime(h.ended)
+      : "Coupon ended around " + fmtTime(h.ended);
+    return txt + " (" + ago(h.ended) + ")";
+  }
   function ageHours(iso) {
     var t = Date.parse(iso);
     return isNaN(t) ? 9999 : (Date.now() - t) / 3600000;
@@ -187,14 +208,16 @@
       var url = safeUrl(h.url);
       var hrs = ageHours(h.at);
       var stale = hrs > 24, fresh = hrs < 1;
-      var li = el("li", "ticket" + (fresh ? " fresh" : "") + (stale ? " stale" : ""));
+      var gone = !!h.ended;
+      var li = el("li", "ticket" + (gone ? " gone" : "") + (fresh && !gone ? " fresh" : "") + (stale && !gone ? " stale" : ""));
       li.style.animationDelay = Math.min(idx, 8) * 40 + "ms";
 
       var pr = parts(h.at);
       var stub = el("div", "stub");
       stub.appendChild(el("span", "n", pr.n));
       stub.appendChild(el("span", "u", pr.u));
-      if (fresh) stub.appendChild(el("span", "t", "New"));
+      if (gone) stub.appendChild(el("span", "t", "Ended"));
+      else if (fresh) stub.appendChild(el("span", "t", "New"));
       li.appendChild(stub);
 
       var body = el("div", "main");
@@ -207,9 +230,10 @@
       if (h.note) meta.appendChild(el("span", /Verified/.test(h.note) ? "ok" : "", h.note.replace(/^[^\w]+/, "")));
       body.appendChild(meta);
 
-      if (stale) body.appendChild(el("div", "old", "Sent over 24 h ago - the coupon may have ended"));
+      if (gone) body.appendChild(el("span", "gone-line", endedText(h)));
+      else if (stale) body.appendChild(el("div", "old", "Sent over 24 h ago - the coupon may have ended"));
       if (url) {
-        var a = el("a", "open" + (stale ? " dim" : ""), "Open course");
+        var a = el("a", "open" + (stale || gone ? " dim" : ""), "Open course");
         a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
         body.appendChild(a);
       }

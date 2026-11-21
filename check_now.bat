@@ -1,5 +1,11 @@
 @echo off
-cd /d "%~dp0"
+set "PROJECT=%USERPROFILE%\Desktop\udemy-deal-alert"
+if not exist "%PROJECT%\local_check.py" (
+  echo Project folder not found: %PROJECT%
+  pause
+  exit /b 1
+)
+cd /d "%PROJECT%"
 curl -s http://127.0.0.1:9222/json/version >nul 2>&1
 if not errorlevel 1 goto run
 set "CHROME=C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -10,5 +16,5 @@ timeout /t 6 /nobreak >nul
 :run
 git checkout -- seen.json state.json tracked.json >nul 2>&1
 git pull --rebase origin main
-python local_check.py --cdp
+python "%PROJECT%\local_check.py" --cdp
 pause

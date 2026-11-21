@@ -65,6 +65,8 @@ def recent_entries(hist):
         url = h.get("url") or ""
         if not url.startswith("https://www.udemy.com/") and not url.startswith("https://udemy.com/"):
             continue
+        if h.get("ended"):          # the bot already saw this coupon end
+            continue
         try:
             at = datetime.fromisoformat(str(h.get("at")).replace("Z", "+00:00"))
             if at.tzinfo is None:

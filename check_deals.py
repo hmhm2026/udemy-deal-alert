@@ -334,7 +334,7 @@ def _parse_iso(v):
         return None
 
 
-def track_expiry(history, now, max_checks=10, window_hours=48, check_fn=None):
+def track_expiry(history, now, max_checks=10, window_hours=48, check_fn=None, on_end=None):
     """Re-check recently sent coupons and record when each one stops being free.
 
     last_ok  = last time Udemy confirmed it free (starts as the send time)
@@ -371,6 +371,8 @@ def track_expiry(history, now, max_checks=10, window_hours=48, check_fn=None):
         elif v == "NOT_FREE":
             if h.get("gone_at"):
                 h["ended"] = h["gone_at"]
+                if on_end:
+                    on_end(h)
             else:
                 h["gone_at"] = stamp
             changed = True
@@ -919,15 +921,61 @@ def tg_send(text, silent=False, preview=True, button=None):
                                      data=urllib.parse.urlencode(fields).encode())
         try:
             with urllib.request.urlopen(req, timeout=25) as r:
-                r.read()
-            break
+                body = r.read()
+            try:
+                mid = (json.loads(body.decode("utf-8", errors="replace")).get("result") or {}).get("message_id")
+            except Exception:
+                mid = None
+            time.sleep(0.5)  # stay well under Telegram rate limits
+            return mid
         except urllib.error.HTTPError as e:
             if e.code == 400 and "reply_markup" in fields and attempt == 1:
                 del fields["reply_markup"]      # Telegram refused the button: send the message without it
                 print("[telegram] button refused, sending without it")
                 continue
             raise SystemExit(f"Telegram error HTTP {e.code} (check token / chat id)") from None
-    time.sleep(0.5)  # stay well under Telegram rate limits
+
+
+def tg_edit(message_id, text):
+    """Replace the text of an earlier message (this also removes its button). Never raises."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat or not message_id:
+        return False
+    fields = {"chat_id": chat, "message_id": message_id, "text": text,
+              "parse_mode": "HTML", "disable_web_page_preview": "true"}
+    try:
+        req = urllib.request.Request(f"https://api.telegram.org/bot{token}/editMessageText",
+                                     data=urllib.parse.urlencode(fields).encode())
+        with urllib.request.urlopen(req, timeout=25) as r:
+            r.read()
+        time.sleep(0.5)
+        return True
+    except Exception as exc:
+        print("[telegram] edit failed:", type(exc).__name__)
+        return False
+
+
+def local_time_text(iso, cfg=None):
+    """HH:MM in the owner's time zone (config 'timezone', default Africa/Cairo)."""
+    t = _parse_iso(iso)
+    if not t:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        t = t.astimezone(ZoneInfo((cfg or {}).get("timezone", "Africa/Cairo")))
+        return t.strftime("%H:%M")
+    except Exception:
+        return t.astimezone(timezone.utc).strftime("%H:%M") + " UTC"
+
+
+def ended_phrase(h, cfg=None):
+    e, l = _parse_iso(h.get("ended")), _parse_iso(h.get("last_ok") or h.get("at"))
+    if e and l and (e - l) > timedelta(minutes=20):
+        if not h.get("last_ok"):
+            return f"found ended at {local_time_text(h['ended'], cfg)} (it may have ended earlier)"
+        return f"ended between {local_time_text(h['last_ok'], cfg)} and {local_time_text(h['ended'], cfg)}"
+    return f"ended around {local_time_text(h.get('ended'), cfg)}"
 
 
 def age_text(t, now):
@@ -1788,8 +1836,11 @@ def main():
 
     if paused:
         loud, digest = [], []
+    sent_msgs = {}
     for d in loud:
-        tg_send(format_deal(d, now), button=("Open course", d["url"]))
+        msg_text = format_deal(d, now)
+        mid = tg_send(msg_text, button=("Open course", d["url"]))
+        sent_msgs[d["url"]] = (mid, msg_text)
         state["sent"].append({"t": d["title"][:80], "s": d["source"]})
     state["sent"] = state["sent"][-200:]
     if loud:
@@ -1804,11 +1855,30 @@ def main():
                             "at": now.isoformat(timespec="seconds"),
                             "listed": listed.isoformat(timespec="seconds") if listed else "",
                             "note": d.get("note", "")})
+            mid, msg_text = sent_msgs.get(d["url"], (None, ""))
+            if mid:
+                history[-1]["mid"], history[-1]["msg"] = mid, msg_text[:3500]
         HISTORY_FILE.write_text(json.dumps(history[-300:], indent=1, ensure_ascii=False), encoding="utf-8")
     try:
         hist2 = load_json(HISTORY_FILE, [])
-        if isinstance(hist2, list) and track_expiry(hist2, now, int(cfg.get("max_expiry_checks", 10))):
-            HISTORY_FILE.write_text(json.dumps(hist2[-300:], indent=1, ensure_ascii=False), encoding="utf-8")
+        if isinstance(hist2, list):
+            def _mark_ended(h):
+                if h.get("mid") and h.get("msg") and not h.get("edited"):
+                    note = f"\n\n❌ <b>Coupon {html.escape(ended_phrase(h, cfg))}</b> - it is no longer free."
+                    if tg_edit(h["mid"], h["msg"] + note):
+                        h["edited"] = True
+                        return True
+                return False
+            changed = track_expiry(hist2, now, int(cfg.get("max_expiry_checks", 10)))
+            tries = 0
+            for h in hist2:                      # edit the Telegram message of every newly ended coupon (retry if it failed)
+                at = _parse_iso(h.get("at")) if isinstance(h, dict) else None
+                if (isinstance(h, dict) and h.get("ended") and h.get("mid") and not h.get("edited")
+                        and at and (now - at) <= timedelta(hours=72) and tries < 5):
+                    tries += 1
+                    changed |= _mark_ended(h)
+            if changed:
+                HISTORY_FILE.write_text(json.dumps(hist2[-300:], indent=1, ensure_ascii=False), encoding="utf-8")
     except Exception as exc:
         print("[expiry] check failed:", type(exc).__name__, exc)
 

@@ -225,7 +225,7 @@
 
       var meta = el("div", "meta");
       meta.appendChild(el("span", "", "Sent " + ago(h.at)));
-      if (h.listed) meta.appendChild(el("span", "", "Listed " + ago(h.listed)));
+      if (h.listed) meta.appendChild(el("span", "", "Posted on source " + ago(h.listed)));
       if (h.source) meta.appendChild(el("span", "", h.source));
       if (h.note) meta.appendChild(el("span", /Verified/.test(h.note) ? "ok" : "", h.note.replace(/^[^\w]+/, "")));
       body.appendChild(meta);

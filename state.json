@@ -1,7 +1,7 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 2,
+   "fails": 3,
    "alerted": false,
    "last_error": "<urlopen error timed out>"
   },

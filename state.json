@@ -6,9 +6,9 @@
    "last_error": ""
   },
   "courson": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "IncompleteRead(64771 bytes read)"
   },
   "discudemy": {
    "fails": 0,

@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "HTTP 500 from cdn.real.discount"
   },
   "courson": {
    "fails": 0,

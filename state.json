@@ -36,69 +36,8 @@
    "last_error": ""
   }
  },
- "sent": [
-  {
-   "t": "AI Browser Agents with Python & Playwright",
-   "s": "real.discount"
-  },
-  {
-   "t": "Ethical Hacking & Penetration Testing with AI",
-   "s": "real.discount"
-  },
-  {
-   "t": "ISTQB Foundation Level (CTFL v4.0) Practice Exams 2026",
-   "s": "real.discount"
-  },
-  {
-   "t": "Playwright Automation Practice Exams 500 Questions 2026 New!",
-   "s": "real.discount"
-  },
-  {
-   "t": "Playwright Automation 200 Qns beginners Knowledge tests 2026",
-   "s": "real.discount"
-  },
-  {
-   "t": "ISTQB® Advanced Level Test Manager (CTAL-TM) v3.0 - 2026",
-   "s": "real.discount"
-  },
-  {
-   "t": "AI Browser Agents with Python & Playwright",
-   "s": "real.discount"
-  },
-  {
-   "t": "Ethical Hacking & Penetration Testing with AI",
-   "s": "real.discount"
-  },
-  {
-   "t": "QA Automation & SDET: Master Technical Interviews",
-   "s": "real.discount"
-  },
-  {
-   "t": "AI Browser Agents with Python & Playwright",
-   "s": "real.discount"
-  },
-  {
-   "t": "Ethical Hacking & Penetration Testing with AI",
-   "s": "real.discount"
-  },
-  {
-   "t": "Complete Agentic SDLC Course : Build Software with AI Agents",
-   "s": "real.discount"
-  },
-  {
-   "t": "WiFi Hacking Unlock Wireless Network Secret and Take Control",
-   "s": "real.discount"
-  },
-  {
-   "t": "500+ Performance Testing Interview Question with Answer 2026",
-   "s": "real.discount"
-  },
-  {
-   "t": "WiFi Hacking & Wireless Penetration Testing with Kali Linux",
-   "s": "real.discount"
-  }
- ],
- "last_summary": "2026-11-16",
+ "sent": [],
+ "last_summary": "2026-11-23",
  "kw_add": [],
  "kw_remove": [],
  "paused_until": "",
@@ -107,41 +46,5 @@
  "await_until": "",
  "min_rating": null,
  "min_students": null,
- "stats_refs": {
-  "playwright-ai-interview-questions-with-answers|1B92E02731EC9DDDE0DA": {
-   "t": "500+ Playwright AI Interview Questions with Answers 2026",
-   "o": "expired",
-   "at": "2026-11-20T16:11+00:00"
-  },
-  "ai-browser-agents-with-python-playwright|NOVFREE01": {
-   "t": "AI Browser Agents with Python & Playwright",
-   "o": "sent",
-   "at": "2026-11-21T04:01+00:00"
-  },
-  "ethical-hacking-penetration-testing-with-ai|NOVFREE01": {
-   "t": "Ethical Hacking & Penetration Testing with AI",
-   "o": "sent",
-   "at": "2026-11-21T04:01+00:00"
-  },
-  "complete-agentic-sdlc-course-build-software-with-ai-agents|B2B6D61C55B4E569DC44": {
-   "t": "Complete Agentic SDLC Course : Build Software with AI Agents",
-   "o": "sent",
-   "at": "2026-11-21T16:10+00:00"
-  },
-  "wireless-networks-penetration-testing-techniques-security|F66DD48AA042F3A80667": {
-   "t": "WiFi Hacking Unlock Wireless Network Secret and Take Control",
-   "o": "sent",
-   "at": "2026-11-22T15:10+00:00"
-  },
-  "performance-testing-interview-question-with-answer|21EB09800982E26370F2": {
-   "t": "500+ Performance Testing Interview Question with Answer 2026",
-   "o": "sent",
-   "at": "2026-11-22T17:00+00:00"
-  },
-  "wifi-hacking-wireless-penetration-testing|CFBBAF7C7F1F9D3316BB": {
-   "t": "WiFi Hacking & Wireless Penetration Testing with Kali Linux",
-   "o": "sent",
-   "at": "2026-11-23T06:15+00:00"
-  }
- }
+ "stats_refs": {}
 }

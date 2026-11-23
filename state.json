@@ -1,14 +1,14 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "<urlopen error timed out>"
   },
   "courson": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "The read operation timed out"
   },
   "discudemy": {
    "fails": 0,

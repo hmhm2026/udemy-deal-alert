@@ -92,6 +92,10 @@
   {
    "t": "500+ Performance Testing Interview Question with Answer 2026",
    "s": "real.discount"
+  },
+  {
+   "t": "WiFi Hacking & Wireless Penetration Testing with Kali Linux",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-16",
@@ -133,6 +137,11 @@
    "t": "500+ Performance Testing Interview Question with Answer 2026",
    "o": "sent",
    "at": "2026-11-22T17:00+00:00"
+  },
+  "wifi-hacking-wireless-penetration-testing|CFBBAF7C7F1F9D3316BB": {
+   "t": "WiFi Hacking & Wireless Penetration Testing with Kali Linux",
+   "o": "sent",
+   "at": "2026-11-23T06:15+00:00"
   }
  }
 }

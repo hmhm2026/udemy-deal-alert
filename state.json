@@ -16,9 +16,9 @@
    "last_error": ""
   },
   "udemyfreebies": {
-   "fails": 1,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error _ssl.c:994: The handshake operation timed out>"
+   "last_error": ""
   },
   "idownloadcoupon": {
    "fails": 0,

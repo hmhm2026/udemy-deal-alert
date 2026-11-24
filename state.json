@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "<urlopen error timed out>"
   },
   "courson": {
    "fails": 0,
@@ -21,9 +21,9 @@
    "last_error": ""
   },
   "idownloadcoupon": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "IncompleteRead(64177 bytes read)"
   },
   "telegram": {
    "fails": 0,

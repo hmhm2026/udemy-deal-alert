@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 2,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error timed out>"
+   "last_error": ""
   },
   "courson": {
    "fails": 0,
@@ -36,7 +36,12 @@
    "last_error": ""
   }
  },
- "sent": [],
+ "sent": [
+  {
+   "t": "Advanced Level Technical Test Analyst (CTAL-TTA) Exams",
+   "s": "real.discount"
+  }
+ ],
  "last_summary": "2026-11-23",
  "kw_add": [],
  "kw_remove": [],
@@ -46,5 +51,11 @@
  "await_until": "",
  "min_rating": null,
  "min_students": null,
- "stats_refs": {}
+ "stats_refs": {
+  "advanced-level-technical-test-analyst-ctal-tta-exams|DF7CB0BEC5B061B34E8D": {
+   "t": "Advanced Level Technical Test Analyst (CTAL-TTA) Exams",
+   "o": "sent",
+   "at": "2026-11-24T06:25+00:00"
+  }
+ }
 }

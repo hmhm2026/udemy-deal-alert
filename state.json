@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 1,
+   "fails": 0,
    "alerted": false,
-   "last_error": "<urlopen error timed out>"
+   "last_error": ""
   },
   "courson": {
    "fails": 0,
@@ -40,6 +40,10 @@
   {
    "t": "Advanced Level Technical Test Analyst (CTAL-TTA) Exams",
    "s": "real.discount"
+  },
+  {
+   "t": "Become a QA Engineer with AI from Day One",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -56,6 +60,11 @@
    "t": "Advanced Level Technical Test Analyst (CTAL-TTA) Exams",
    "o": "sent",
    "at": "2026-11-24T06:25+00:00"
+  },
+  "become-a-qa-engineer-with-ai-from-day-one|5E020AF337E7183B90EE": {
+   "t": "Become a QA Engineer with AI from Day One",
+   "o": "sent",
+   "at": "2026-11-25T09:40+00:00"
   }
  }
 }

@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "<urlopen error timed out>"
   },
   "courson": {
    "fails": 0,
@@ -52,6 +52,10 @@
   {
    "t": "Master SAST, DAST, Penetration Testing, and Security Debugging for Modern Web Ap",
    "s": "courson"
+  },
+  {
+   "t": "Manual Testing Interview Questions With Answers",
+   "s": "courson"
   }
  ],
  "last_summary": "2026-11-23",
@@ -83,6 +87,11 @@
    "t": "Master SAST, DAST, Penetration Testing, and Security Debugging for Modern Web Ap",
    "o": "sent",
    "at": "2026-11-25T12:00+00:00"
+  },
+  "manual-testing-interview-questions-with-answers|A12C7354C092EC5D5740": {
+   "t": "Manual Testing Interview Questions With Answers",
+   "o": "sent",
+   "at": "2026-11-25T17:45+00:00"
   }
  }
 }

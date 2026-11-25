@@ -44,6 +44,10 @@
   {
    "t": "Become a QA Engineer with AI from Day One",
    "s": "real.discount"
+  },
+  {
+   "t": "The Real Power of Penetration Testing Unveiled",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -65,6 +69,11 @@
    "t": "Become a QA Engineer with AI from Day One",
    "o": "sent",
    "at": "2026-11-25T09:40+00:00"
+  },
+  "the-real-power-of-penetration-testing-unveiled|NOV26-FREE": {
+   "t": "The Real Power of Penetration Testing Unveiled",
+   "o": "sent",
+   "at": "2026-11-25T11:55+00:00"
   }
  }
 }

@@ -48,6 +48,10 @@
   {
    "t": "The Real Power of Penetration Testing Unveiled",
    "s": "real.discount"
+  },
+  {
+   "t": "Master SAST, DAST, Penetration Testing, and Security Debugging for Modern Web Ap",
+   "s": "courson"
   }
  ],
  "last_summary": "2026-11-23",
@@ -74,6 +78,11 @@
    "t": "The Real Power of Penetration Testing Unveiled",
    "o": "sent",
    "at": "2026-11-25T11:55+00:00"
+  },
+  "mastering-application-security-testing-and-debugging|NOV26-FREE": {
+   "t": "Master SAST, DAST, Penetration Testing, and Security Debugging for Modern Web Ap",
+   "o": "sent",
+   "at": "2026-11-25T12:00+00:00"
   }
  }
 }

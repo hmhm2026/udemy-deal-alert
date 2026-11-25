@@ -1,9 +1,9 @@
 {
  "health": {
   "realdiscount": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "<urlopen error timed out>"
   },
   "courson": {
    "fails": 0,
@@ -56,6 +56,10 @@
   {
    "t": "Manual Testing Interview Questions With Answers",
    "s": "courson"
+  },
+  {
+   "t": "ServiceNow Automated Test Framework(ATF) with ITSM 2026",
+   "s": "telegram:Coursevania"
   }
  ],
  "last_summary": "2026-11-23",
@@ -92,6 +96,11 @@
    "t": "Manual Testing Interview Questions With Answers",
    "o": "sent",
    "at": "2026-11-25T17:45+00:00"
+  },
+  "tg:Coursevania/99284": {
+   "t": "ServiceNow Automated Test Framework(ATF) with ITSM 2026",
+   "o": "sent",
+   "at": "2026-11-25T18:05+00:00"
   }
  }
 }

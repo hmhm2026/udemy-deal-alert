@@ -72,6 +72,14 @@
   {
    "t": "Playwright Automation Practice Exams 500 Questions 2026 New!",
    "s": "real.discount"
+  },
+  {
+   "t": "Specflow BDD: C# Testing Mastery",
+   "s": "real.discount"
+  },
+  {
+   "t": "Selenium in C# - Setup Simple Test Automation Framework",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -128,6 +136,16 @@
    "t": "Playwright Automation Practice Exams 500 Questions 2026 New!",
    "o": "sent",
    "at": "2026-11-26T02:40+00:00"
+  },
+  "specflow-bdd-c-testing-mastery|OCTOBERFREE32026": {
+   "t": "Specflow BDD: C# Testing Mastery",
+   "o": "sent",
+   "at": "2026-11-26T05:55+00:00"
+  },
+  "selenium-in-c-sharp-taf-for-beginners-learnit|OCTOBERFREE32026": {
+   "t": "Selenium in C# - Setup Simple Test Automation Framework",
+   "o": "sent",
+   "at": "2026-11-26T05:55+00:00"
   }
  }
 }

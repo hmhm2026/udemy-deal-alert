@@ -84,6 +84,10 @@
   {
    "t": "Defect Management & QA Reporting: Metrics & KPIs",
    "s": "real.discount"
+  },
+  {
+   "t": "ISTQB CT-AI Certification: AI Testing Complete Prep 2026",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -155,6 +159,11 @@
    "t": "Defect Management & QA Reporting: Metrics & KPIs",
    "o": "sent",
    "at": "2026-11-26T06:00+00:00"
+  },
+  "istqb-ct-ai-certification-ai-testing-complete-prep-2026|7C8BA870AC088447A1A1": {
+   "t": "ISTQB CT-AI Certification: AI Testing Complete Prep 2026",
+   "o": "sent",
+   "at": "2026-11-26T13:45+00:00"
   }
  }
 }

@@ -80,6 +80,10 @@
   {
    "t": "Selenium in C# - Setup Simple Test Automation Framework",
    "s": "real.discount"
+  },
+  {
+   "t": "Defect Management & QA Reporting: Metrics & KPIs",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -146,6 +150,11 @@
    "t": "Selenium in C# - Setup Simple Test Automation Framework",
    "o": "sent",
    "at": "2026-11-26T05:55+00:00"
+  },
+  "test-metrics-kpis-learnit|OCTOBERFREE32026": {
+   "t": "Defect Management & QA Reporting: Metrics & KPIs",
+   "o": "sent",
+   "at": "2026-11-26T06:00+00:00"
   }
  }
 }

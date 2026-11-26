@@ -96,6 +96,30 @@
   {
    "t": "TestNG Advanced: Practice Tests & Certification Prep",
    "s": "real.discount"
+  },
+  {
+   "t": "k6 Performance Testing Certification Practice Tests",
+   "s": "real.discount"
+  },
+  {
+   "t": "Katalon Certified Professional Practice Tests",
+   "s": "real.discount"
+  },
+  {
+   "t": "LoadRunner Performance Testing Cert Practice Tests",
+   "s": "real.discount"
+  },
+  {
+   "t": "Postman API Student Expert Certification Practice Tests",
+   "s": "real.discount"
+  },
+  {
+   "t": "Postman API Test Automation Cert Practice Tests",
+   "s": "real.discount"
+  },
+  {
+   "t": "Robot Framework RCPTT Certification: Practice Exam Prep",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -187,6 +211,41 @@
    "t": "TestNG Advanced: Practice Tests & Certification Prep",
    "o": "sent",
    "at": "2026-11-26T14:05+00:00"
+  },
+  "k6-performance-testing-certification-practice-tests|048C37E9D7C3EC0F0A64": {
+   "t": "k6 Performance Testing Certification Practice Tests",
+   "o": "sent",
+   "at": "2026-11-26T14:10+00:00"
+  },
+  "katalon-certified-professional-practice-tests|D93698FE537CED048E4C": {
+   "t": "Katalon Certified Professional Practice Tests",
+   "o": "sent",
+   "at": "2026-11-26T14:10+00:00"
+  },
+  "loadrunner-performance-testing-cert-practice-tests|F966DA2CCA1CDED9DA2A": {
+   "t": "LoadRunner Performance Testing Cert Practice Tests",
+   "o": "sent",
+   "at": "2026-11-26T14:10+00:00"
+  },
+  "postman-api-student-expert-certification-practice-tests|EB51888D5320B93D6DC3": {
+   "t": "Postman API Student Expert Certification Practice Tests",
+   "o": "sent",
+   "at": "2026-11-26T14:10+00:00"
+  },
+  "postman-api-test-automation-cert-practice-tests|CBFE2B8946C4F6BB899E": {
+   "t": "Postman API Test Automation Cert Practice Tests",
+   "o": "sent",
+   "at": "2026-11-26T14:10+00:00"
+  },
+  "robot-framework-rcptt-certification-practice-exam-prep|F09F7F577A075B74F81B": {
+   "t": "Robot Framework RCPTT Certification: Practice Exam Prep",
+   "o": "sent",
+   "at": "2026-11-26T14:10+00:00"
+  },
+  "tg:Coursevania/99616": {
+   "t": "TestNG Advanced: Practice Tests & Certification Prep",
+   "o": "expired",
+   "at": "2026-11-26T14:10+00:00"
   }
  }
 }

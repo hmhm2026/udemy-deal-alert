@@ -124,6 +124,10 @@
   {
    "t": "ISTQB  Exams for Certified Tester Foundation Level (CTFL)",
    "s": "real.discount"
+  },
+  {
+   "t": "CompTIA Penetration Testing+ (PenTest+) Certification",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -265,6 +269,11 @@
    "t": "ISTQB  Exams for Certified Tester Foundation Level (CTFL)",
    "o": "sent",
    "at": "2026-11-26T14:55+00:00"
+  },
+  "comptia-penetration-testing-pentest-certification|446A6A497A1F3C841B13": {
+   "t": "CompTIA Penetration Testing+ (PenTest+) Certification",
+   "o": "sent",
+   "at": "2026-11-26T15:20+00:00"
   }
  }
 }

@@ -120,6 +120,10 @@
   {
    "t": "Robot Framework RCPTT Certification: Practice Exam Prep",
    "s": "real.discount"
+  },
+  {
+   "t": "ISTQB  Exams for Certified Tester Foundation Level (CTFL)",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -256,6 +260,11 @@
    "t": "Postman API Test Automation Cert Practice Tests",
    "o": "expired",
    "at": "2026-11-26T14:15+00:00"
+  },
+  "istqb-exams-for-certified-tester-foundation-level-ctfl|659C54F7299E68513117": {
+   "t": "ISTQB  Exams for Certified Tester Foundation Level (CTFL)",
+   "o": "sent",
+   "at": "2026-11-26T14:55+00:00"
   }
  }
 }

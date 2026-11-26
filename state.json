@@ -68,6 +68,10 @@
   {
    "t": "ISTQB® Advanced Level Test Manager (CTAL-TM) v3.0 - 2026",
    "s": "real.discount"
+  },
+  {
+   "t": "Playwright Automation Practice Exams 500 Questions 2026 New!",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -119,6 +123,11 @@
    "t": "ISTQB® Advanced Level Test Manager (CTAL-TM) v3.0 - 2026",
    "o": "sent",
    "at": "2026-11-26T02:35+00:00"
+  },
+  "playwright-automation-500-architect-practice-exams-2026|C6883A8A227B5FE46A2E": {
+   "t": "Playwright Automation Practice Exams 500 Questions 2026 New!",
+   "o": "sent",
+   "at": "2026-11-26T02:40+00:00"
   }
  }
 }

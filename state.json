@@ -136,6 +136,10 @@
   {
    "t": "Software Testing & QA Mastery: Practice Exams",
    "s": "real.discount"
+  },
+  {
+   "t": "Agile Project Management Certification Prep+Agile Scrum+Jira",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -292,6 +296,11 @@
    "t": "Software Testing & QA Mastery: Practice Exams",
    "o": "sent",
    "at": "2026-11-27T08:35+00:00"
+  },
+  "agile-project-management-certification|271126_FREE": {
+   "t": "Agile Project Management Certification Prep+Agile Scrum+Jira",
+   "o": "sent",
+   "at": "2026-11-27T12:40+00:00"
   }
  }
 }

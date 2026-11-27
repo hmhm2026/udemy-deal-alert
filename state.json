@@ -128,6 +128,10 @@
   {
    "t": "CompTIA Penetration Testing+ (PenTest+) Certification",
    "s": "real.discount"
+  },
+  {
+   "t": "500+ AI Testing & Evaluation Engineer Interview Q&A [2026]",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -274,6 +278,11 @@
    "t": "CompTIA Penetration Testing+ (PenTest+) Certification",
    "o": "sent",
    "at": "2026-11-26T15:20+00:00"
+  },
+  "ai-testing-evaluation-engineer-interview-qa|3CE7D6A29F1F7236F9E0": {
+   "t": "500+ AI Testing & Evaluation Engineer Interview Q&A [2026]",
+   "o": "sent",
+   "at": "2026-11-27T05:15+00:00"
   }
  }
 }

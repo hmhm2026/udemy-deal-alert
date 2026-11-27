@@ -21,9 +21,9 @@
    "last_error": ""
   },
   "idownloadcoupon": {
-   "fails": 0,
+   "fails": 1,
    "alerted": false,
-   "last_error": ""
+   "last_error": "HTTP 500 from idownloadcoupon.com"
   },
   "telegram": {
    "fails": 0,

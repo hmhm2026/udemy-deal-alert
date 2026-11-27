@@ -132,6 +132,10 @@
   {
    "t": "500+ AI Testing & Evaluation Engineer Interview Q&A [2026]",
    "s": "real.discount"
+  },
+  {
+   "t": "Software Testing & QA Mastery: Practice Exams",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -283,6 +287,11 @@
    "t": "500+ AI Testing & Evaluation Engineer Interview Q&A [2026]",
    "o": "sent",
    "at": "2026-11-27T05:15+00:00"
+  },
+  "software-testing-qa-mastery-practice-exams|43A08B172ECB1365CDAF": {
+   "t": "Software Testing & QA Mastery: Practice Exams",
+   "o": "sent",
+   "at": "2026-11-27T08:35+00:00"
   }
  }
 }

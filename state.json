@@ -148,6 +148,10 @@
   {
    "t": "Master QA Automation interviews with 800+ Selenium, API, SQL, Java, TestNG & JMe",
    "s": "courson"
+  },
+  {
+   "t": "Manual Software Testing Course 2026 Qa For Beginners",
+   "s": "courson"
   }
  ],
  "last_summary": "2026-11-23",
@@ -319,6 +323,11 @@
    "t": "Master QA Automation interviews with 800+ Selenium, API, SQL, Java, TestNG & JMe",
    "o": "sent",
    "at": "2026-11-28T09:10+00:00"
+  },
+  "manual-software-testing-course-2026-qa-for-beginners|938F0DC3026606532F80": {
+   "t": "Manual Software Testing Course 2026 Qa For Beginners",
+   "o": "sent",
+   "at": "2026-11-28T09:15+00:00"
   }
  }
 }

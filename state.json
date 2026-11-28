@@ -140,6 +140,10 @@
   {
    "t": "Agile Project Management Certification Prep+Agile Scrum+Jira",
    "s": "real.discount"
+  },
+  {
+   "t": "Software QA & Automated Testing: Practice Exams",
+   "s": "real.discount"
   }
  ],
  "last_summary": "2026-11-23",
@@ -301,6 +305,11 @@
    "t": "Agile Project Management Certification Prep+Agile Scrum+Jira",
    "o": "sent",
    "at": "2026-11-27T12:40+00:00"
+  },
+  "software-qa-automated-testing-practice-exams|50F8FF044F61D171D142": {
+   "t": "Software QA & Automated Testing: Practice Exams",
+   "o": "sent",
+   "at": "2026-11-28T05:00+00:00"
   }
  }
 }

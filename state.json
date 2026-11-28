@@ -144,6 +144,10 @@
   {
    "t": "Software QA & Automated Testing: Practice Exams",
    "s": "real.discount"
+  },
+  {
+   "t": "Master QA Automation interviews with 800+ Selenium, API, SQL, Java, TestNG & JMe",
+   "s": "courson"
   }
  ],
  "last_summary": "2026-11-23",
@@ -310,6 +314,11 @@
    "t": "Software QA & Automated Testing: Practice Exams",
    "o": "sent",
    "at": "2026-11-28T05:00+00:00"
+  },
+  "top-800-qa-automation-interview-questions-2026|7A36A63E3CB5C3FB1395": {
+   "t": "Master QA Automation interviews with 800+ Selenium, API, SQL, Java, TestNG & JMe",
+   "o": "sent",
+   "at": "2026-11-28T09:10+00:00"
   }
  }
 }

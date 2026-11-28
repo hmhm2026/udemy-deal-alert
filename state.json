@@ -152,6 +152,10 @@
   {
    "t": "Manual Software Testing Course 2026 Qa For Beginners",
    "s": "courson"
+  },
+  {
+   "t": "Istqb Foundation Level V40 Practice Exams 300 Questions",
+   "s": "courson"
   }
  ],
  "last_summary": "2026-11-23",
@@ -328,6 +332,11 @@
    "t": "Manual Software Testing Course 2026 Qa For Beginners",
    "o": "sent",
    "at": "2026-11-28T09:15+00:00"
+  },
+  "istqb-foundation-level-v40-practice-exams-300-questions|41DC0A8A968F2A1D0EE6": {
+   "t": "Istqb Foundation Level V40 Practice Exams 300 Questions",
+   "o": "sent",
+   "at": "2026-11-28T09:20+00:00"
   }
  }
 }
